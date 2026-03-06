@@ -15,8 +15,8 @@ MOSCOW_TZ = dt.timezone(dt.timedelta(hours=3))
 
 class MongoClient:
     def __init__(self, config: MongoConfig):
-        self.user = config.mongo_user = None
-        self.password = config.mongo_password = None
+        self.user = config.mongo_user
+        self.password = config.mongo_password
         self.host = config.mongo_host
         self.port = config.mongo_port
         self.db_name = config.mongo_db_name
@@ -30,10 +30,18 @@ class MongoClient:
     def get_mongo_client(
         self,
     ) -> AsyncIOMotorClient:
-        if self.user and self.password:
+        # Проверяем, что user и password не пустые и не равны "..."
+        has_auth = (
+            self.user
+            and self.password
+            and self.user != "..."
+            and self.password != "..."
+        )
+        
+        if has_auth:
             uri = f"mongodb://{self.user}:{self.password}@{self.host}:{self.port}/{self.db_name}"
         else:
-            uri = f"mongodb://{self.host}:{self.port}/{self.db_name}"  # mongodb://{self.host}:{self.port}
+            uri = f"mongodb://{self.host}:{self.port}/{self.db_name}"
 
         return AsyncIOMotorClient(
             uri,
@@ -42,21 +50,23 @@ class MongoClient:
 
     async def ping(
         self,
-    ):
+    ) -> bool:
         """
-        Infrastructure.
+        Проверяет подключение к MongoDB.
+        
+        Returns:
+            True, если подключение успешно, иначе False
         """
         try:
             await self.client.admin.command(
                 "ping",
             )
-            _LOG.info(
-                "Соединение с MongoDB успешно!"
-            )
+            return True
         except Exception as e:
             _LOG.error(
-                e
+                f"Ошибка подключения к MongoDB: {e}",
             )
+            return False
 
     async def get_user(
         self,
@@ -76,3 +86,52 @@ class MongoClient:
                 f"Ошибка при получении пользователя {tg_user_id} из MongoDB: {e}"
             )
             return None
+
+    async def create_or_update_user(
+        self,
+        user: User,
+    ) -> User:
+        """
+        Создает нового пользователя или обновляет существующего.
+        Если пользователь существует, обновляет его данные (username, name и т.д.),
+        но сохраняет роль и дату создания.
+        
+        Args:
+            user: Объект пользователя для создания/обновления
+        
+        Returns:
+            Созданный или обновленный пользователь
+        """
+        try:
+            existing_user = await self.get_user(user.id)
+            
+            if existing_user:
+                # Обновляем существующего пользователя
+                update_data = user.model_dump(
+                    exclude={"id", "role", "created_at"},
+                )
+                update_data["updated_at"] = dt.datetime.now(tz=MOSCOW_TZ)
+                
+                await self.users_collection.update_one(
+                    {"id": user.id},
+                    {"$set": update_data},
+                )
+                
+                # Возвращаем обновленного пользователя с сохраненными полями
+                updated_user = existing_user.model_copy(
+                    update=update_data,
+                )
+                return updated_user
+            else:
+                # Создаем нового пользователя
+                user_dict = user.model_dump()
+                await self.users_collection.insert_one(user_dict)
+                _LOG.info(
+                    f"Создан новый пользователь: {user.id} ({user.username or 'без username'})",
+                )
+                return user
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при создании/обновлении пользователя {user.id} в MongoDB: {e}",
+            )
+            raise

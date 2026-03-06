@@ -9,17 +9,23 @@ from aiogram import (
 )
 from aiogram.filters import Command
 
-from src.config import TOKEN
+from src.config import TOKEN, MongoConfig
+from src.clients.mongo import MongoClient
 from src.modules.handlers import (
     start_handler,
     callback_handler,
     admin_callback_handler,
+    set_mongo_client,
 )
 
 
 _LOG = logging.getLogger("woman-tg-bot")
 
 dp = Dispatcher()
+
+# Инициализация MongoDB клиента
+mongo_config = MongoConfig()
+mongo_client = MongoClient(mongo_config)
 
 
 async def register_handlers(
@@ -46,6 +52,22 @@ async def main() -> None:
     """
     Функция запуска бота.
     """
+    # Устанавливаем MongoClient в handlers
+    set_mongo_client(mongo_client)
+    
+    # Проверяем подключение к MongoDB
+    is_connected = await mongo_client.ping()
+    if is_connected:
+        _LOG.info(
+            f"Подключение к MongoDB успешно: {mongo_config.mongo_host}:{mongo_config.mongo_port}/{mongo_config.mongo_db_name}",
+        )
+    else:
+        _LOG.warning(
+            f"Не удалось подключиться к MongoDB ({mongo_config.mongo_host}:{mongo_config.mongo_port})",
+        )
+        _LOG.warning(
+            "Бот будет работать без БД. Все пользователи будут иметь роль USER по умолчанию.",
+        )
 
     await register_handlers(
         dp,
