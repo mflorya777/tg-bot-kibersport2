@@ -10,7 +10,11 @@ from aiogram import (
 from aiogram.filters import Command
 
 from src.config import TOKEN
-from src.modules.handlers import start_handler, callback_handler
+from src.modules.handlers import (
+    start_handler,
+    callback_handler,
+    admin_callback_handler,
+)
 
 
 _LOG = logging.getLogger("woman-tg-bot")
@@ -31,6 +35,10 @@ async def register_handlers(
     dp.callback_query.register(
         callback_handler,
         F.data.startswith("menu_"),
+    )
+    dp.callback_query.register(
+        admin_callback_handler,
+        F.data.startswith("admin_"),
     )
 
 
