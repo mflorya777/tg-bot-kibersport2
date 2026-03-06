@@ -1,6 +1,5 @@
 import logging
 from functools import partial
-from dotenv import load_dotenv
 
 from aiogram import (
     Bot,
@@ -11,11 +10,11 @@ from aiogram import (
 from aiogram.filters import Command
 
 from src.config import TOKEN
+from src.modules.handlers import start_handler, callback_handler
 
 
 _LOG = logging.getLogger("woman-tg-bot")
 
-load_dotenv()
 dp = Dispatcher()
 
 
@@ -25,7 +24,14 @@ async def register_handlers(
     """
     Функция регистрации всех хэндлеров.
     """
-    pass
+    dp.message.register(
+        start_handler,
+        Command("start"),
+    )
+    dp.callback_query.register(
+        callback_handler,
+        F.data.startswith("menu_"),
+    )
 
 
 async def main() -> None:

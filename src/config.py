@@ -4,9 +4,9 @@ from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
 
-TOKEN = getenv("BOT_TOKEN")
+load_dotenv("local.env")
 
-load_dotenv()
+TOKEN = getenv("BOT_TOKEN")
 
 
 class MongoConfig(BaseSettings):
