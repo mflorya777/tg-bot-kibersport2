@@ -6,10 +6,6 @@ from dotenv import load_dotenv
 
 TOKEN = getenv("BOT_TOKEN")
 
-DEEPSEEK_API_KEY = getenv("DEEPSEEK_API_KEY")
-DEEPSEEK_API_URL = getenv("DEEPSEEK_API_URL")
-MODELS = getenv("MODEL", "").split()
-
 load_dotenv()
 
 

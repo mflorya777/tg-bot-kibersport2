@@ -36,18 +36,6 @@ class User(BaseModel):
         None,
         description="Номер телефона",
     )
-    is_age_confirmed: bool = Field(
-        False,
-        description="Подтверждение 18+",
-    )
-    has_subscription: bool = Field(
-        False,
-        description="Есть ли активная подписка",
-    )
-    subscription_expires_at: Optional[dt.datetime] = Field(
-        None,
-        description="Дата окончания подписки",
-    )
     created_at: dt.datetime = Field(
         default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
         description="Дата регистрации",

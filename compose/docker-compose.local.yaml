@@ -1,9 +1,9 @@
-name: woman-tg-bot
+name: kibersport-tg-bot
 services:
-  woman-tg-bot:
+  kibersport-tg-bot:
     image: ${IMAGE_NAME}
-    hostname: woman-tg-bot
-    container_name: woman-tg-bot
+    hostname: kibersport-tg-bot
+    container_name: kibersport-tg-bot
     ports:
       - "8081:8081"
     networks:
@@ -11,7 +11,7 @@ services:
     env_file:
       - ../local.env
     volumes:
-      - ${FILES_STORAGE_DIRECTORY}:/opt/woman-tg-bot/files_storage_directory
+      - ${FILES_STORAGE_DIRECTORY}:/opt/kibersport-tg-bot/files_storage_directory
 
 networks:
   vps-network:
