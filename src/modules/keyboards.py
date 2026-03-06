@@ -156,3 +156,26 @@ def get_admin_panel_keyboard(
         inline_keyboard=keyboard_rows,
     )
     return keyboard
+
+
+def get_profile_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для экрана профиля.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✏️ Редактировать профиль",
+                    callback_data="profile_edit",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ Назад в меню",
+                    callback_data="menu_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard

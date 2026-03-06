@@ -40,7 +40,7 @@ async def register_handlers(
     )
     dp.callback_query.register(
         callback_handler,
-        F.data.startswith("menu_"),
+        F.data.startswith("menu_") | F.data.startswith("profile_"),
     )
     dp.callback_query.register(
         admin_callback_handler,

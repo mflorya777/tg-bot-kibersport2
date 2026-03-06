@@ -6,6 +6,7 @@ from aiogram.filters import Command
 from src.modules.keyboards import (
     get_main_menu_keyboard,
     get_admin_panel_keyboard,
+    get_profile_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import User
@@ -59,6 +60,66 @@ async def get_user_role(
             f"Ошибка при получении роли пользователя {user_id}: {e}",
         )
         return UserRole.USER
+
+
+def format_profile_text(
+    user: Optional[User],
+    tg_user: types.User,
+) -> str:
+    """
+    Форматирует текст профиля пользователя для отображения.
+    
+    Args:
+        user: Объект пользователя из БД (может быть None)
+        tg_user: Объект пользователя из Telegram
+    
+    Returns:
+        Отформатированный текст профиля
+    """
+    lines = ["🧑 Профиль\n"]
+    
+    # Никнейм
+    nickname = user.nickname if user and user.nickname else None
+    if nickname:
+        lines.append(f"👤 Никнейм: {nickname}")
+    elif tg_user.username:
+        lines.append(f"👤 Никнейм: @{tg_user.username}")
+    else:
+        lines.append("👤 Никнейм: не указан")
+    
+    # Игра/дисциплина
+    game_discipline = user.game_discipline if user and user.game_discipline else None
+    if game_discipline:
+        lines.append(f"🎮 Игра/дисциплина: {game_discipline}")
+    else:
+        lines.append("🎮 Игра/дисциплина: не указана")
+    
+    # Регион/страна
+    region_country = user.region_country if user and user.region_country else None
+    if region_country:
+        lines.append(f"🌍 Регион/страна: {region_country}")
+    else:
+        lines.append("🌍 Регион/страна: не указан")
+    
+    # ID пользователя (для поддержки)
+    lines.append(f"\n🆔 ID пользователя: {tg_user.id}")
+    
+    # Статистика
+    lines.append("\n📊 Статистика:")
+    
+    tournaments_played = user.tournaments_played if user else 0
+    lines.append(f"🏆 Турниров сыграно: {tournaments_played}")
+    
+    total_kills = user.total_kills if user else 0
+    lines.append(f"⚔️ Всего киллов: {total_kills}")
+    
+    rating_position = user.rating_position if user and user.rating_position else None
+    if rating_position:
+        lines.append(f"📈 Место в рейтинге: #{rating_position}")
+    else:
+        lines.append("📈 Место в рейтинге: не определено")
+    
+    return "\n".join(lines)
 
 
 def has_admin_access(
@@ -152,11 +213,23 @@ async def callback_handler(
 
     if callback_data == "menu_profile":
         await callback.answer("Профиль")
+        
+        # Получаем данные пользователя из БД
+        user = None
+        if _mongo_client is not None:
+            try:
+                user = await _mongo_client.get_user(callback.from_user.id)
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении профиля пользователя {callback.from_user.id}: {e}",
+                )
+        
+        # Формируем текст профиля
+        profile_text = format_profile_text(user, callback.from_user)
+        
         await callback.message.edit_text(
-            text="🧑 Профиль\n\nРаздел в разработке...",
-            reply_markup=get_main_menu_keyboard(
-                show_admin=show_admin,
-            ),
+            text=profile_text,
+            reply_markup=get_profile_keyboard(),
         )
     elif callback_data == "menu_team":
         await callback.answer("Команда")
@@ -248,6 +321,12 @@ async def callback_handler(
             reply_markup=get_admin_panel_keyboard(
                 is_super_admin=is_super_admin,
             ),
+        )
+    elif callback_data == "profile_edit":
+        await callback.answer("Редактирование профиля")
+        await callback.message.edit_text(
+            text="✏️ Редактирование профиля\n\nРаздел в разработке...",
+            reply_markup=get_profile_keyboard(),
         )
     elif callback_data == "menu_back":
         await callback.answer("Главное меню")

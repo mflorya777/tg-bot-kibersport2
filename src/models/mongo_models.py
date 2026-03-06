@@ -38,6 +38,33 @@ class User(BaseModel):
         None,
         description="Номер телефона",
     )
+    #
+    nickname: Optional[str] = Field(
+        None,
+        description="Никнейм игрока",
+    )
+    game_discipline: Optional[str] = Field(
+        None,
+        description="Игра/дисциплина",
+    )
+    region_country: Optional[str] = Field(
+        None,
+        description="Регион/страна",
+    )
+    #
+    tournaments_played: int = Field(
+        default=0,
+        description="Количество сыгранных турниров",
+    )
+    total_kills: int = Field(
+        default=0,
+        description="Всего киллов",
+    )
+    rating_position: Optional[int] = Field(
+        None,
+        description="Место в рейтинге",
+    )
+    #
     role: UserRole = Field(
         default=UserRole.USER,
         description="Роль пользователя в системе",
