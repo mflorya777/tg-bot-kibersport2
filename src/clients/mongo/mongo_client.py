@@ -5,7 +5,7 @@ import datetime as dt
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from src.config import MongoConfig
-from src.models.mongo_models import User
+from src.models.mongo_models import User, Team
 
 
 _LOG = logging.getLogger("woman-tg-bot")
@@ -26,6 +26,7 @@ class MongoClient:
         self.client = self.get_mongo_client()
         self.db = self.client[self.db_name]
         self.users_collection = self.db[self.users_collection_name]
+        self.teams_collection = self.db["teams"]
 
     def get_mongo_client(
         self,
@@ -133,5 +134,106 @@ class MongoClient:
         except Exception as e:
             _LOG.error(
                 f"Ошибка при создании/обновлении пользователя {user.id} в MongoDB: {e}",
+            )
+            raise
+
+    async def get_team(
+        self,
+        team_id: str,
+    ) -> Optional[Team]:
+        """
+        Получает команду по ID.
+        
+        Args:
+            team_id: ID команды
+        
+        Returns:
+            Объект команды или None, если команда не найдена
+        """
+        try:
+            doc = await self.teams_collection.find_one({"id": team_id})
+            if not doc:
+                return None
+            return Team(**doc)
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении команды {team_id} из MongoDB: {e}",
+            )
+            return None
+
+    async def get_user_team(
+        self,
+        user_id: int,
+    ) -> Optional[Team]:
+        """
+        Получает команду пользователя.
+        
+        Args:
+            user_id: Telegram user_id
+        
+        Returns:
+            Объект команды или None, если пользователь не в команде
+        """
+        try:
+            user = await self.get_user(user_id)
+            if not user or not user.team_id:
+                return None
+            return await self.get_team(user.team_id)
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении команды пользователя {user_id}: {e}",
+            )
+            return None
+
+    async def create_team(
+        self,
+        team: Team,
+    ) -> Team:
+        """
+        Создает новую команду в базе данных.
+        
+        Args:
+            team: Объект команды для создания
+        
+        Returns:
+            Созданная команда
+        """
+        try:
+            team_dict = team.model_dump()
+            await self.teams_collection.insert_one(team_dict)
+            _LOG.info(
+                f"Создана новая команда: {team.id} ({team.name})",
+            )
+            return team
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при создании команды {team.id} в MongoDB: {e}",
+            )
+            raise
+
+    async def update_user_team(
+        self,
+        user_id: int,
+        team_id: Optional[str],
+    ) -> None:
+        """
+        Обновляет team_id пользователя.
+        
+        Args:
+            user_id: Telegram user_id
+            team_id: ID команды (None для удаления из команды)
+        """
+        try:
+            update_data = {
+                "team_id": team_id,
+                "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+            }
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": update_data},
+            )
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при обновлении team_id пользователя {user_id}: {e}",
             )
             raise

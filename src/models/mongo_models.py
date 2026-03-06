@@ -77,3 +77,57 @@ class User(BaseModel):
         None,
         description="Дата последнего обновления",
     )
+    #
+    team_id: Optional[str] = Field(
+        None,
+        description="ID команды, в которой состоит пользователь",
+    )
+
+
+class Team(BaseModel):
+    id: str = Field(
+        ...,
+        description="Уникальный ID команды",
+    )
+    name: str = Field(
+        ...,
+        description="Название команды",
+    )
+    tag: str = Field(
+        ...,
+        description="Тег команды (короткое название)",
+    )
+    captain_id: int = Field(
+        ...,
+        description="Telegram user_id капитана команды",
+    )
+    members: list[int] = Field(
+        default_factory=list,
+        description="Список Telegram user_id участников команды",
+    )
+    #
+    tournaments_played: int = Field(
+        default=0,
+        description="Количество сыгранных турниров",
+    )
+    total_points: int = Field(
+        default=0,
+        description="Всего очков команды",
+    )
+    rating_position: Optional[int] = Field(
+        None,
+        description="Место в рейтинге",
+    )
+    #
+    invite_code: str = Field(
+        ...,
+        description="Код-приглашение для вступления в команду",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата создания команды",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )

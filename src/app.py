@@ -15,6 +15,7 @@ from src.modules.handlers import (
     start_handler,
     callback_handler,
     admin_callback_handler,
+    team_create_message_handler,
     set_mongo_client,
 )
 
@@ -38,9 +39,12 @@ async def register_handlers(
         start_handler,
         Command("start"),
     )
+    dp.message.register(
+        team_create_message_handler,
+    )
     dp.callback_query.register(
         callback_handler,
-        F.data.startswith("menu_") | F.data.startswith("profile_"),
+        F.data.startswith("menu_") | F.data.startswith("profile_") | F.data.startswith("team_"),
     )
     dp.callback_query.register(
         admin_callback_handler,

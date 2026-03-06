@@ -166,16 +166,121 @@ def get_profile_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✏️ Редактировать профиль",
+                    text="✏️ Изменить профиль",
                     callback_data="profile_edit",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    text="◀️ Назад в меню",
+                    text="📎 Привязать соцсети",
+                    callback_data="profile_social",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔒 Настройки приватности",
+                    callback_data="profile_privacy",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
                     callback_data="menu_back",
                 ),
             ],
         ],
+    )
+    return keyboard
+
+
+def get_team_no_team_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для пользователя без команды.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Создать команду",
+                    callback_data="team_create",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔎 Найти команду",
+                    callback_data="team_search",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📩 Ввести код-приглашение",
+                    callback_data="team_join_code",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="menu_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_team_keyboard(
+    is_captain: bool = False,
+    is_admin: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для пользователя с командой.
+    
+    Args:
+        is_captain: Является ли пользователь капитаном команды
+        is_admin: Является ли пользователь админом/супер-админом
+    """
+    keyboard_rows = []
+    
+    # Кнопки доступные капитану и админу
+    if is_captain or is_admin:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="👤 Назначить капитана",
+                callback_data="team_set_captain",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="➕ Пригласить игрока",
+            callback_data="team_invite",
+        ),
+    ])
+    
+    # Кнопка управления заявками только для капитана
+    if is_captain:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="🛠 Управление заявками",
+                callback_data="team_manage_requests",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="❌ Покинуть команду",
+            callback_data="team_leave",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="menu_back",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
     )
     return keyboard
