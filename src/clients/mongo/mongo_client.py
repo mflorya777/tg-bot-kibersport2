@@ -920,3 +920,86 @@ class MongoClient:
         except Exception as e:
             _LOG.error(f"Ошибка при обновлении роли пользователя {user_id}: {e}")
             raise
+
+    async def find_team_by_name_or_tag(
+        self,
+        query: str,
+    ) -> Optional[Team]:
+        """
+        Ищет команду по названию или тегу.
+        
+        Args:
+            query: Поисковый запрос (название или тег)
+        
+        Returns:
+            Найденная команда или None
+        """
+        try:
+            # Ищем по названию
+            doc = await self.teams_collection.find_one(
+                {"name": query}
+            )
+            if doc:
+                return Team(**doc)
+            
+            # Ищем по тегу
+            doc = await self.teams_collection.find_one(
+                {"tag": query}
+            )
+            if doc:
+                return Team(**doc)
+            
+            return None
+        except Exception as e:
+            _LOG.error(f"Ошибка при поиске команды по запросу '{query}': {e}")
+            return None
+    
+    async def update_team_ban_status(
+        self,
+        team_id: str,
+        is_banned: bool,
+    ) -> None:
+        """
+        Обновляет статус бана команды.
+        
+        Args:
+            team_id: ID команды
+            is_banned: Забанена ли команда
+        """
+        try:
+            await self.teams_collection.update_one(
+                {"id": team_id},
+                {"$set": {
+                    "is_banned": is_banned,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлен статус бана для команды {team_id}: {is_banned}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении статуса бана для команды {team_id}: {e}")
+            raise
+    
+    async def update_team_captain_confirmed(
+        self,
+        team_id: str,
+        captain_confirmed: bool,
+    ) -> None:
+        """
+        Обновляет статус подтверждения капитана команды.
+        
+        Args:
+            team_id: ID команды
+            captain_confirmed: Подтвержден ли капитан
+        """
+        try:
+            await self.teams_collection.update_one(
+                {"id": team_id},
+                {"$set": {
+                    "captain_confirmed": captain_confirmed,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлен статус подтверждения капитана для команды {team_id}: {captain_confirmed}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении статуса подтверждения капитана для команды {team_id}: {e}")
+            raise

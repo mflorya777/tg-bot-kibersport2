@@ -98,7 +98,7 @@ async def register_handlers(
             return
         
         # Проверяем состояние поиска пользователя в админ-панели
-        from src.modules.handlers import _waiting_user_search, _waiting_token_amount
+        from src.modules.handlers import _waiting_user_search, _waiting_token_amount, _waiting_team_search
         if _waiting_user_search.get(user_id, False):
             print(f"[DEBUG] >>> Вызываем admin_user_search_message_handler для пользователя {user_id}")
             from src.modules.handlers import admin_user_search_message_handler
@@ -110,6 +110,13 @@ async def register_handlers(
             print(f"[DEBUG] >>> Вызываем admin_token_amount_message_handler для пользователя {user_id}")
             from src.modules.handlers import admin_token_amount_message_handler
             await admin_token_amount_message_handler(message)
+            return
+        
+        # Проверяем состояние поиска команды в админ-панели
+        if _waiting_team_search.get(user_id, False):
+            print(f"[DEBUG] >>> Вызываем admin_team_search_message_handler для пользователя {user_id}")
+            from src.modules.handlers import admin_team_search_message_handler
+            await admin_team_search_message_handler(message)
             return
         
         # Если ни одно состояние не активно, ничего не делаем

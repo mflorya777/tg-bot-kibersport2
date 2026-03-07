@@ -1124,3 +1124,73 @@ def get_admin_user_role_keyboard(
         inline_keyboard=keyboard_rows,
     )
     return keyboard
+
+
+def get_admin_teams_search_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для поиска команд в админ-панели.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_team_card_keyboard(
+    team_id: str,
+    is_banned: bool = False,
+    captain_confirmed: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для карточки команды в админ-панели.
+    
+    Args:
+        team_id: ID команды
+        is_banned: Забанена ли команда
+        captain_confirmed: Подтвержден ли капитан
+    """
+    keyboard_rows = []
+    
+    # Подтверждение капитана
+    if not captain_confirmed:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="✅ Подтвердить капитана",
+                callback_data=f"admin_team_confirm_captain_{team_id}",
+            ),
+        ])
+    
+    # Блокировка команды
+    if is_banned:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="✅ Разблокировать команду",
+                callback_data=f"admin_team_unban_{team_id}",
+            ),
+        ])
+    else:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="🚫 Заблокировать команду",
+                callback_data=f"admin_team_ban_{team_id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_teams",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard

@@ -157,6 +157,14 @@ class Team(BaseModel):
         ...,
         description="Код-приглашение для вступления в команду",
     )
+    is_banned: bool = Field(
+        default=False,
+        description="Забанена ли команда",
+    )
+    captain_confirmed: bool = Field(
+        default=False,
+        description="Подтвержден ли капитан команды администратором",
+    )
     created_at: dt.datetime = Field(
         default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
         description="Дата создания команды",

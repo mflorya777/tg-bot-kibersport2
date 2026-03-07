@@ -32,6 +32,8 @@ from src.modules.keyboards import (
     get_admin_users_search_keyboard,
     get_admin_user_card_keyboard,
     get_admin_user_role_keyboard,
+    get_admin_teams_search_keyboard,
+    get_admin_team_card_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -67,6 +69,9 @@ _waiting_promocode: dict[int, bool] = {}
 
 # Словарь для хранения состояния поиска пользователя в админ-панели
 _waiting_user_search: dict[int, bool] = {}
+
+# Словарь для хранения состояния поиска команды в админ-панели
+_waiting_team_search: dict[int, bool] = {}
 
 # Словарь для хранения состояния ожидания суммы токенов для начисления/списания
 _waiting_token_amount: dict[int, dict] = {}
@@ -202,6 +207,69 @@ def format_profile_text(
         lines.append(f"📈 Место в рейтинге: #{rating_position}")
     else:
         lines.append("📈 Место в рейтинге: не определено")
+    
+    return "\n".join(lines)
+
+
+async def format_admin_team_card_text(
+    team: Team,
+) -> str:
+    """
+    Форматирует текст карточки команды для админ-панели.
+    
+    Args:
+        team: Объект команды
+    
+    Returns:
+        Отформатированный текст карточки команды
+    """
+    lines = [f"👥 Карточка команды\n"]
+    
+    # Основная информация
+    lines.append("📋 Информация:")
+    lines.append(f"  🆔 ID: <code>{team.id}</code>")
+    lines.append(f"  🏷 Название: {team.name}")
+    lines.append(f"  📌 Тег: {team.tag}")
+    lines.append(f"  🔑 Код-приглашение: <code>{team.invite_code}</code>")
+    if team.is_banned:
+        lines.append("  🚫 Статус: <b>Заблокирована</b>")
+    else:
+        lines.append("  ✅ Статус: Активна")
+    if team.captain_confirmed:
+        lines.append("  ✅ Капитан: Подтвержден")
+    else:
+        lines.append("  ⏳ Капитан: Не подтвержден")
+    
+    lines.append("")
+    
+    # Состав команды
+    lines.append("👥 Состав команды:")
+    if team.members:
+        for member_id in team.members:
+            member_name = f"ID:{member_id}"
+            if _mongo_client is not None:
+                try:
+                    member_user = await _mongo_client.get_user(member_id)
+                    if member_user:
+                        member_name = member_user.nickname or member_user.name or f"ID:{member_id}"
+                except Exception:
+                    pass
+            
+            captain_mark = " 👑" if member_id == team.captain_id else ""
+            lines.append(f"  • {member_name}{captain_mark}")
+    else:
+        lines.append("  (пусто)")
+    
+    lines.append("")
+    
+    # Статистика команды
+    lines.append("📊 Статистика команды:")
+    lines.append(f"  🏆 Турниров сыграно: {team.tournaments_played}")
+    lines.append(f"  ⭐ Всего очков: {team.total_points}")
+    if team.rating_position:
+        lines.append(f"  📈 Место в рейтинге: #{team.rating_position}")
+    else:
+        lines.append("  📈 Место в рейтинге: не определено")
     
     return "\n".join(lines)
 
@@ -1980,11 +2048,111 @@ async def admin_callback_handler(
     elif callback_data == "admin_teams":
         await callback.answer("Команды")
         await callback.message.edit_text(
-            text="🧑‍🤝‍🧑 Команды\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
-            ),
+            text="🧑‍🤝‍🧑 Команды\n\n"
+                 "Введите название команды, тег или ID команды для поиска.\n\n"
+                 "Примеры:\n"
+                 "  • Название команды\n"
+                 "  • TAG\n"
+                 "  • team_abc123",
+            reply_markup=get_admin_teams_search_keyboard(),
         )
+        # Активируем режим поиска команды
+        _waiting_team_search[callback.from_user.id] = True
+    elif callback_data.startswith("admin_team_card_"):
+        # Показываем карточку команды
+        team_id = callback_data.replace("admin_team_card_", "")
+        await callback.answer("Карточка команды")
+        
+        if _mongo_client is not None:
+            try:
+                team = await _mongo_client.get_team(team_id)
+                if not team:
+                    await callback.answer("Команда не найдена", show_alert=True)
+                    return
+                
+                team_card_text = await format_admin_team_card_text(team)
+                
+                await callback.message.edit_text(
+                    text=team_card_text,
+                    reply_markup=get_admin_team_card_keyboard(
+                        team_id=team_id,
+                        is_banned=team.is_banned,
+                        captain_confirmed=team.captain_confirmed,
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении карточки команды: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_team_confirm_captain_"):
+        # Подтверждение капитана
+        team_id = callback_data.replace("admin_team_confirm_captain_", "")
+        await callback.answer("Подтвердить капитана")
+        
+        if _mongo_client is not None:
+            try:
+                await _mongo_client.update_team_captain_confirmed(team_id, True)
+                team = await _mongo_client.get_team(team_id)
+                if team:
+                    team_card_text = await format_admin_team_card_text(team)
+                    await callback.message.edit_text(
+                        text=team_card_text,
+                        reply_markup=get_admin_team_card_keyboard(
+                            team_id=team_id,
+                            is_banned=team.is_banned,
+                            captain_confirmed=True,
+                        ),
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при подтверждении капитана: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_team_ban_"):
+        # Блокировка команды
+        team_id = callback_data.replace("admin_team_ban_", "")
+        await callback.answer("Заблокировать команду")
+        
+        if _mongo_client is not None:
+            try:
+                await _mongo_client.update_team_ban_status(team_id, True)
+                team = await _mongo_client.get_team(team_id)
+                if team:
+                    team_card_text = await format_admin_team_card_text(team)
+                    await callback.message.edit_text(
+                        text=team_card_text,
+                        reply_markup=get_admin_team_card_keyboard(
+                            team_id=team_id,
+                            is_banned=True,
+                            captain_confirmed=team.captain_confirmed,
+                        ),
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при блокировке команды: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_team_unban_"):
+        # Разблокировка команды
+        team_id = callback_data.replace("admin_team_unban_", "")
+        await callback.answer("Разблокировать команду")
+        
+        if _mongo_client is not None:
+            try:
+                await _mongo_client.update_team_ban_status(team_id, False)
+                team = await _mongo_client.get_team(team_id)
+                if team:
+                    team_card_text = await format_admin_team_card_text(team)
+                    await callback.message.edit_text(
+                        text=team_card_text,
+                        reply_markup=get_admin_team_card_keyboard(
+                            team_id=team_id,
+                            is_banned=False,
+                            captain_confirmed=team.captain_confirmed,
+                        ),
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при разблокировке команды: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
     elif callback_data.startswith("admin_user_card_"):
         # Показываем карточку пользователя
         target_user_id = int(callback_data.replace("admin_user_card_", ""))
@@ -3141,6 +3309,75 @@ async def admin_user_search_message_handler(
     
     # Сбрасываем флаг ожидания
     _waiting_user_search.pop(user_id, None)
+
+
+async def admin_team_search_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для поиска команд в админ-панели.
+    """
+    user_id = message.from_user.id
+    
+    # Проверяем, ожидает ли пользователь ввода поискового запроса
+    if not _waiting_team_search.get(user_id, False):
+        return
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_team_search.pop(user_id, None)
+        await message.answer(
+            "❌ Поиск отменён.",
+            reply_markup=get_admin_teams_search_keyboard(),
+        )
+        return
+    
+    # Проверяем, что это текстовое сообщение
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с названием, тегом или ID команды.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    search_query = message.text.strip()
+    
+    # Ищем команду
+    found_team = None
+    if _mongo_client is not None:
+        try:
+            # Пробуем найти по ID
+            if search_query.startswith("team_"):
+                found_team = await _mongo_client.get_team(search_query)
+            else:
+                # Ищем по названию или тегу
+                found_team = await _mongo_client.find_team_by_name_or_tag(search_query)
+        except Exception as e:
+            _LOG.error(f"Ошибка при поиске команды: {e}")
+    
+    if not found_team:
+        await message.answer(
+            f"❌ Команда не найдена: <code>{search_query}</code>\n\n"
+            "Попробуйте другой запрос или отправьте /cancel для отмены.",
+            parse_mode="HTML",
+        )
+        return
+    
+    # Показываем карточку команды
+    team_card_text = await format_admin_team_card_text(found_team)
+    
+    await message.answer(
+        text=team_card_text,
+        reply_markup=get_admin_team_card_keyboard(
+            team_id=found_team.id,
+            is_banned=found_team.is_banned,
+            captain_confirmed=found_team.captain_confirmed,
+        ),
+        parse_mode="HTML",
+    )
+    
+    # Сбрасываем флаг ожидания
+    _waiting_team_search.pop(user_id, None)
 
 
 async def admin_token_amount_message_handler(
