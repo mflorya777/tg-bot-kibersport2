@@ -44,7 +44,11 @@ async def register_handlers(
     )
     dp.callback_query.register(
         callback_handler,
-        F.data.startswith("menu_") | F.data.startswith("profile_") | F.data.startswith("team_"),
+        F.data.startswith("menu_")
+        | F.data.startswith("profile_")
+        | F.data.startswith("team_")
+        | F.data.startswith("tournaments_")
+        | F.data.startswith("tournament_"),
     )
     dp.callback_query.register(
         admin_callback_handler,

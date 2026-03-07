@@ -5,7 +5,7 @@ import datetime as dt
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from src.config import MongoConfig
-from src.models.mongo_models import User, Team
+from src.models.mongo_models import User, Team, Tournament, TournamentStatus, TournamentFormat
 
 
 _LOG = logging.getLogger("woman-tg-bot")
@@ -27,6 +27,7 @@ class MongoClient:
         self.db = self.client[self.db_name]
         self.users_collection = self.db[self.users_collection_name]
         self.teams_collection = self.db["teams"]
+        self.tournaments_collection = self.db["tournaments"]
 
     def get_mongo_client(
         self,
@@ -235,5 +236,88 @@ class MongoClient:
         except Exception as e:
             _LOG.error(
                 f"Ошибка при обновлении team_id пользователя {user_id}: {e}",
+            )
+            raise
+
+    async def get_tournament(
+        self,
+        tournament_id: str,
+    ) -> Optional[Tournament]:
+        """
+        Получает турнир по ID.
+        
+        Args:
+            tournament_id: ID турнира
+        
+        Returns:
+            Объект турнира или None, если турнир не найден
+        """
+        try:
+            doc = await self.tournaments_collection.find_one({"id": tournament_id})
+            if not doc:
+                return None
+            return Tournament(**doc)
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении турнира {tournament_id} из MongoDB: {e}",
+            )
+            return None
+
+    async def get_tournaments(
+        self,
+        status: Optional[TournamentStatus] = None,
+        game_discipline: Optional[str] = None,
+    ) -> list[Tournament]:
+        """
+        Получает список турниров с фильтрацией.
+        
+        Args:
+            status: Фильтр по статусу (опционально)
+            game_discipline: Фильтр по игре/дисциплине (опционально)
+        
+        Returns:
+            Список турниров
+        """
+        try:
+            query = {}
+            if status:
+                query["status"] = status.value
+            if game_discipline:
+                query["game_discipline"] = game_discipline
+            
+            cursor = self.tournaments_collection.find(query).sort("created_at", -1)
+            tournaments = []
+            async for doc in cursor:
+                tournaments.append(Tournament(**doc))
+            return tournaments
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении турниров из MongoDB: {e}",
+            )
+            return []
+
+    async def update_tournament(
+        self,
+        tournament: Tournament,
+    ) -> Tournament:
+        """
+        Обновляет турнир в базе данных.
+        
+        Args:
+            tournament: Объект турнира для обновления
+        
+        Returns:
+            Обновленный объект турнира
+        """
+        try:
+            tournament.updated_at = dt.datetime.now(tz=MOSCOW_TZ)
+            await self.tournaments_collection.update_one(
+                {"id": tournament.id},
+                {"$set": tournament.model_dump()},
+            )
+            return tournament
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при обновлении турнира {tournament.id} в MongoDB: {e}",
             )
             raise

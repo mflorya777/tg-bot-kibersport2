@@ -1,4 +1,5 @@
 from typing import Optional
+from enum import Enum
 from pydantic import (
     BaseModel,
     Field,
@@ -126,6 +127,104 @@ class Team(BaseModel):
     created_at: dt.datetime = Field(
         default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
         description="Дата создания команды",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )
+
+
+class TournamentStatus(str, Enum):
+    """
+    Статусы турнира.
+    """
+    REGISTRATION_OPEN = "registration_open"  # Открыта регистрация
+    IN_PROGRESS = "in_progress"  # Идёт
+    COMPLETED = "completed"  # Завершён
+
+
+class TournamentFormat(str, Enum):
+    """
+    Форматы турнира.
+    """
+    SOLO = "solo"  # Соло
+    TEAM = "team"  # Команды
+
+
+class Tournament(BaseModel):
+    id: str = Field(
+        ...,
+        description="Уникальный ID турнира",
+    )
+    name: str = Field(
+        ...,
+        description="Название турнира",
+    )
+    game_discipline: str = Field(
+        ...,
+        description="Игра/дисциплина",
+    )
+    #
+    registration_start: dt.datetime = Field(
+        ...,
+        description="Дата начала регистрации",
+    )
+    registration_end: dt.datetime = Field(
+        ...,
+        description="Дата окончания регистрации",
+    )
+    start_date: dt.datetime = Field(
+        ...,
+        description="Дата начала турнира",
+    )
+    end_date: Optional[dt.datetime] = Field(
+        None,
+        description="Дата окончания турнира",
+    )
+    #
+    format: TournamentFormat = Field(
+        ...,
+        description="Формат турнира (соло/команды)",
+    )
+    status: TournamentStatus = Field(
+        default=TournamentStatus.REGISTRATION_OPEN,
+        description="Статус турнира",
+    )
+    #
+    entry_fee: Optional[int] = Field(
+        None,
+        description="Взнос (в CD токенах), если есть",
+    )
+    prizes: Optional[str] = Field(
+        None,
+        description="Описание призов, если есть",
+    )
+    participant_limit: Optional[int] = Field(
+        None,
+        description="Лимит участников/команд",
+    )
+    #
+    rules_summary: Optional[str] = Field(
+        None,
+        description="Короткие правила подсчёта",
+    )
+    full_rules: Optional[str] = Field(
+        None,
+        description="Полные правила турнира",
+    )
+    #
+    solo_participants: list[int] = Field(
+        default_factory=list,
+        description="Список Telegram user_id участников (для соло)",
+    )
+    team_participants: list[str] = Field(
+        default_factory=list,
+        description="Список team_id команд-участников (для командного)",
+    )
+    #
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата создания турнира",
     )
     updated_at: Optional[dt.datetime] = Field(
         None,

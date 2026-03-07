@@ -1,4 +1,7 @@
+from typing import Optional
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from src.models.mongo_models import Team, Tournament
 
 
 def get_main_menu_keyboard(
@@ -277,6 +280,210 @@ def get_team_keyboard(
         InlineKeyboardButton(
             text="⬅️ Назад",
             callback_data="menu_back",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_tournaments_list_keyboard(
+    tournaments: Optional[list] = None,
+    current_filter: str = "all",
+    current_game: Optional[str] = None,
+    available_games: Optional[list[str]] = None,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для списка турниров с фильтрами.
+    
+    Args:
+        current_filter: Текущий фильтр (all, registration_open, in_progress, completed)
+        current_game: Текущая выбранная игра (опционально)
+        available_games: Список доступных игр для фильтрации
+    """
+    keyboard_rows = []
+    
+    # Фильтры по статусу (вертикально, друг над другом)
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ Все" if current_filter == "all" else "Все",
+            callback_data="tournaments_filter_all",
+        ),
+    ])
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ Открыта регистрация" if current_filter == "registration_open" else "Открыта регистрация",
+            callback_data="tournaments_filter_registration_open",
+        ),
+    ])
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ Идёт" if current_filter == "in_progress" else "Идёт",
+            callback_data="tournaments_filter_in_progress",
+        ),
+    ])
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ Завершён" if current_filter == "completed" else "Завершён",
+            callback_data="tournaments_filter_completed",
+        ),
+    ])
+    
+    # Фильтр по игре (если игр несколько)
+    if available_games and len(available_games) > 1:
+        game_buttons = []
+        for game in available_games[:4]:  # Максимум 4 кнопки
+            is_selected = current_game == game
+            game_buttons.append(
+                InlineKeyboardButton(
+                    text=f"{'✅ ' if is_selected else ''}{game}",
+                    callback_data=f"tournaments_filter_game_{game}",
+                ),
+            )
+        if len(game_buttons) > 0:
+            keyboard_rows.append(game_buttons)
+    
+    # Кнопки для каждого турнира
+    if tournaments:
+        keyboard_rows.append([])  # Пустая строка для разделения
+        for tournament in tournaments[:10]:  # Максимум 10 турниров
+            status_emoji = {
+                "registration_open": "✅",
+                "in_progress": "🔄",
+                "completed": "🏁",
+            }
+            emoji = status_emoji.get(tournament.status.value, "🏆")
+            format_emoji = "👤" if tournament.format.value == "solo" else "👥"
+            
+            keyboard_rows.append([
+                InlineKeyboardButton(
+                    text=f"{emoji} {tournament.name} {format_emoji}",
+                    callback_data=f"tournament_view_{tournament.id}",
+                ),
+            ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="menu_back",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_tournament_card_keyboard(
+    tournament_id: str,
+    tournament_status: str,
+    is_participant: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для карточки турнира.
+    
+    Args:
+        tournament_id: ID турнира
+        tournament_status: Статус турнира
+        is_participant: Участвует ли пользователь в турнире
+    """
+    keyboard_rows = []
+    
+    # Кнопка вступления (только если открыта регистрация и пользователь не участвует)
+    if tournament_status == "registration_open" and not is_participant:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="✅ Вступить",
+                callback_data=f"tournament_join_{tournament_id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="📋 Правила",
+            callback_data=f"tournament_rules_{tournament_id}",
+        ),
+        InlineKeyboardButton(
+            text="👥 Участники/Команды",
+            callback_data=f"tournament_participants_{tournament_id}",
+        ),
+    ])
+    
+    # Кнопка таблицы результатов (только если турнир идёт или завершён)
+    if tournament_status in ("in_progress", "completed"):
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="📊 Таблица результатов",
+                callback_data=f"tournament_results_{tournament_id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="tournaments_list",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_tournament_join_confirm_keyboard(
+    tournament_id: str,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для подтверждения участия в турнире (соло).
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Подтвердить",
+                    callback_data=f"tournament_confirm_{tournament_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data=f"tournament_view_{tournament_id}",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_tournament_team_select_keyboard(
+    tournament_id: str,
+    user_teams: list[Team],
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора команды при вступлении в командный турнир.
+    
+    Args:
+        tournament_id: ID турнира
+        user_teams: Список команд пользователя
+    """
+    keyboard_rows = []
+    
+    for team in user_teams:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"{team.name} ({team.tag})",
+                callback_data=f"tournament_join_team_{tournament_id}_{team.id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data=f"tournament_view_{tournament_id}",
         ),
     ])
     

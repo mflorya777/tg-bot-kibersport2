@@ -1,6 +1,7 @@
 import logging
 import secrets
 import string
+import datetime as dt
 from typing import Optional
 from aiogram import types
 from aiogram.filters import Command
@@ -11,9 +12,20 @@ from src.modules.keyboards import (
     get_profile_keyboard,
     get_team_no_team_keyboard,
     get_team_keyboard,
+    get_tournaments_list_keyboard,
+    get_tournament_card_keyboard,
+    get_tournament_join_confirm_keyboard,
+    get_tournament_team_select_keyboard,
 )
 from src.models.user_roles import UserRole
-from src.models.mongo_models import User, Team
+from src.models.mongo_models import (
+    User,
+    Team,
+    Tournament,
+    TournamentStatus,
+    TournamentFormat,
+    MOSCOW_TZ,
+)
 from src.clients.mongo import MongoClient
 
 
@@ -214,6 +226,111 @@ async def format_team_text(
     return "\n".join(lines)
 
 
+def format_tournament_card(
+    tournament: Tournament,
+    is_participant: bool = False,
+) -> str:
+    """
+    Форматирует карточку турнира для отображения.
+    
+    Args:
+        tournament: Объект турнира
+        is_participant: Участвует ли пользователь в турнире
+    
+    Returns:
+        Отформатированный текст карточки турнира
+    """
+    lines = [f"🏆 {tournament.name}\n"]
+    
+    # Даты
+    reg_start = tournament.registration_start.strftime("%d.%m.%Y %H:%M")
+    reg_end = tournament.registration_end.strftime("%d.%m.%Y %H:%M")
+    start = tournament.start_date.strftime("%d.%m.%Y %H:%M")
+    
+    lines.append(f"📅 Регистрация: {reg_start} - {reg_end}")
+    lines.append(f"🚀 Старт: {start}")
+    
+    if tournament.end_date:
+        end = tournament.end_date.strftime("%d.%m.%Y %H:%M")
+        lines.append(f"🏁 Финиш: {end}")
+    
+    # Формат
+    format_text = "👤 Соло" if tournament.format == TournamentFormat.SOLO else "👥 Команды"
+    lines.append(f"📋 Формат: {format_text}")
+    
+    # Взнос и призы
+    if tournament.entry_fee:
+        lines.append(f"💰 Взнос: {tournament.entry_fee} CD токенов")
+    
+    if tournament.prizes:
+        lines.append(f"🎁 Призы: {tournament.prizes}")
+    
+    # Лимит участников
+    if tournament.participant_limit:
+        current_participants = (
+            len(tournament.solo_participants)
+            if tournament.format == TournamentFormat.SOLO
+            else len(tournament.team_participants)
+        )
+        lines.append(
+            f"👥 Участников: {current_participants}/{tournament.participant_limit}",
+        )
+    
+    # Статус
+    status_text = {
+        TournamentStatus.REGISTRATION_OPEN: "✅ Открыта регистрация",
+        TournamentStatus.IN_PROGRESS: "🔄 Идёт",
+        TournamentStatus.COMPLETED: "🏁 Завершён",
+    }
+    lines.append(f"\n📊 Статус: {status_text.get(tournament.status, tournament.status.value)}")
+    
+    # Короткие правила
+    if tournament.rules_summary:
+        lines.append(f"\n📝 Правила подсчёта:\n{tournament.rules_summary}")
+    
+    # Информация об участии
+    if is_participant:
+        lines.append("\n✅ Вы участвуете в этом турнире")
+    
+    return "\n".join(lines)
+
+
+def format_tournaments_list(
+    tournaments: list[Tournament],
+) -> str:
+    """
+    Форматирует список турниров для отображения.
+    
+    Args:
+        tournaments: Список турниров
+    
+    Returns:
+        Отформатированный текст списка турниров
+    """
+    if not tournaments:
+        return "🏆 Турниры\n\nТурниры не найдены."
+    
+    lines = ["🏆 Турниры\n"]
+    
+    for i, tournament in enumerate(tournaments, 1):
+        status_emoji = {
+            TournamentStatus.REGISTRATION_OPEN: "✅",
+            TournamentStatus.IN_PROGRESS: "🔄",
+            TournamentStatus.COMPLETED: "🏁",
+        }
+        emoji = status_emoji.get(tournament.status, "🏆")
+        
+        format_text = "👤" if tournament.format == TournamentFormat.SOLO else "👥"
+        
+        lines.append(
+            f"{i}. {emoji} <b>{tournament.name}</b> {format_text}\n"
+            f"   📅 {tournament.start_date.strftime('%d.%m.%Y')}\n"
+            f"   🎮 {tournament.game_discipline}",
+        )
+    
+    return "\n".join(lines)
+
+
 def has_admin_access(
     role: UserRole,
 ) -> bool:
@@ -377,10 +494,28 @@ async def callback_handler(
             )
     elif callback_data == "menu_tournaments":
         await callback.answer("Турниры")
+        
+        # Получаем список турниров
+        tournaments = []
+        available_games = []
+        if _mongo_client is not None:
+            try:
+                tournaments = await _mongo_client.get_tournaments()
+                # Получаем список уникальных игр
+                available_games = list(
+                    set(t.game_discipline for t in tournaments),
+                )
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турниров: {e}",
+                )
+        
+        tournaments_text = format_tournaments_list(tournaments)
         await callback.message.edit_text(
-            text="🏆 Турниры\n\nРаздел в разработке...",
-            reply_markup=get_main_menu_keyboard(
-                show_admin=show_admin,
+            text=tournaments_text,
+            reply_markup=get_tournaments_list_keyboard(
+                current_filter="all",
+                available_games=available_games,
             ),
         )
     elif callback_data == "menu_ratings":
@@ -588,6 +723,479 @@ async def callback_handler(
             reply_markup=get_team_keyboard(
                 is_captain=is_captain,
                 is_admin=has_admin_access(user_role),
+            ),
+        )
+    elif callback_data == "tournaments_list":
+        await callback.answer("Список турниров")
+        
+        # Получаем список турниров
+        tournaments = []
+        available_games = []
+        if _mongo_client is not None:
+            try:
+                tournaments = await _mongo_client.get_tournaments()
+                available_games = list(
+                    set(t.game_discipline for t in tournaments),
+                )
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турниров: {e}",
+                )
+        
+        tournaments_text = format_tournaments_list(tournaments)
+        await callback.message.edit_text(
+            text=tournaments_text,
+            reply_markup=get_tournaments_list_keyboard(
+                tournaments=tournaments,
+                current_filter="all",
+                available_games=available_games,
+            ),
+        )
+    elif callback_data.startswith("tournaments_filter_"):
+        # Обработка фильтров турниров
+        filter_type = callback_data.replace("tournaments_filter_", "")
+        
+        status_filter = None
+        game_filter = None
+        
+        if filter_type == "all":
+            pass  # Без фильтра
+        elif filter_type == "registration_open":
+            status_filter = TournamentStatus.REGISTRATION_OPEN
+        elif filter_type == "in_progress":
+            status_filter = TournamentStatus.IN_PROGRESS
+        elif filter_type == "completed":
+            status_filter = TournamentStatus.COMPLETED
+        elif filter_type.startswith("game_"):
+            game_filter = filter_type.replace("game_", "")
+        
+        # Получаем список турниров с фильтром
+        tournaments = []
+        available_games = []
+        if _mongo_client is not None:
+            try:
+                tournaments = await _mongo_client.get_tournaments(
+                    status=status_filter,
+                    game_discipline=game_filter,
+                )
+                available_games = list(
+                    set(t.game_discipline for t in tournaments),
+                )
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турниров: {e}",
+                )
+        
+        tournaments_text = format_tournaments_list(tournaments)
+        current_filter = filter_type if not filter_type.startswith("game_") else "all"
+        await callback.message.edit_text(
+            text=tournaments_text,
+            reply_markup=get_tournaments_list_keyboard(
+                tournaments=tournaments,
+                current_filter=current_filter,
+                current_game=game_filter,
+                available_games=available_games,
+            ),
+        )
+    elif callback_data.startswith("tournament_view_"):
+        # Просмотр карточки турнира
+        tournament_id = callback_data.replace("tournament_view_", "")
+        
+        tournament = None
+        is_participant = False
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+                if tournament:
+                    # Проверяем, участвует ли пользователь
+                    if tournament.format == TournamentFormat.SOLO:
+                        is_participant = callback.from_user.id in tournament.solo_participants
+                    else:
+                        user = await _mongo_client.get_user(callback.from_user.id)
+                        if user and user.team_id:
+                            is_participant = user.team_id in tournament.team_participants
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турнира {tournament_id}: {e}",
+                )
+        
+        if not tournament:
+            await callback.answer(
+                "Турнир не найден",
+                show_alert=True,
+            )
+            return
+        
+        tournament_text = format_tournament_card(tournament, is_participant)
+        await callback.message.edit_text(
+            text=tournament_text,
+            reply_markup=get_tournament_card_keyboard(
+                tournament_id=tournament_id,
+                tournament_status=tournament.status.value,
+                is_participant=is_participant,
+            ),
+        )
+    elif callback_data.startswith("tournament_join_"):
+        # Вступление в турнир
+        tournament_id = callback_data.replace("tournament_join_", "")
+        
+        tournament = None
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турнира {tournament_id}: {e}",
+                )
+        
+        if not tournament:
+            await callback.answer(
+                "Турнир не найден",
+                show_alert=True,
+            )
+            return
+        
+        if tournament.status != TournamentStatus.REGISTRATION_OPEN:
+            await callback.answer(
+                "Регистрация на турнир закрыта",
+                show_alert=True,
+            )
+            return
+        
+        # Проверяем формат турнира
+        if tournament.format == TournamentFormat.SOLO:
+            # Соло турнир - показываем подтверждение
+            await callback.answer("Подтверждение участия")
+            await callback.message.edit_text(
+                text=(
+                    f"🏆 {tournament.name}\n\n"
+                    f"Подтвердите участие в турнире.\n\n"
+                    f"Формат: Соло\n"
+                    f"{f'Взнос: {tournament.entry_fee} CD токенов' if tournament.entry_fee else ''}"
+                ),
+                reply_markup=get_tournament_join_confirm_keyboard(tournament_id),
+            )
+        else:
+            # Командный турнир - выбираем команду
+            user = None
+            user_teams = []
+            if _mongo_client is not None:
+                try:
+                    user = await _mongo_client.get_user(callback.from_user.id)
+                    if user and user.team_id:
+                        team = await _mongo_client.get_team(user.team_id)
+                        if team:
+                            user_teams = [team]
+                except Exception as e:
+                    _LOG.error(
+                        f"Ошибка при получении команды пользователя: {e}",
+                    )
+            
+            if not user_teams:
+                await callback.answer(
+                    "Ты не в команде",
+                    show_alert=True,
+                )
+                return
+            
+            await callback.answer("Выбор команды")
+            await callback.message.edit_text(
+                text=(
+                    f"🏆 {tournament.name}\n\n"
+                    f"Выберите команду для участия в турнире:"
+                ),
+                reply_markup=get_tournament_team_select_keyboard(
+                    tournament_id=tournament_id,
+                    user_teams=user_teams,
+                ),
+            )
+    elif callback_data.startswith("tournament_confirm_"):
+        # Подтверждение участия в соло турнире
+        tournament_id = callback_data.replace("tournament_confirm_", "")
+        
+        if _mongo_client is None:
+            await callback.answer(
+                "Ошибка: база данных недоступна",
+                show_alert=True,
+            )
+            return
+        
+        try:
+            tournament = await _mongo_client.get_tournament(tournament_id)
+            if not tournament:
+                await callback.answer(
+                    "Турнир не найден",
+                    show_alert=True,
+                )
+                return
+            
+            if tournament.format != TournamentFormat.SOLO:
+                await callback.answer(
+                    "Это командный турнир",
+                    show_alert=True,
+                )
+                return
+            
+            # Проверяем, не участвует ли уже
+            if callback.from_user.id in tournament.solo_participants:
+                await callback.answer(
+                    "Вы уже участвуете в этом турнире",
+                    show_alert=True,
+                )
+                return
+            
+            # Проверяем лимит участников
+            if tournament.participant_limit:
+                if len(tournament.solo_participants) >= tournament.participant_limit:
+                    await callback.answer(
+                        "Достигнут лимит участников",
+                        show_alert=True,
+                    )
+                    return
+            
+            # Добавляем участника
+            tournament.solo_participants.append(callback.from_user.id)
+            await _mongo_client.update_tournament(tournament)
+            
+            await callback.answer("✅ Вы успешно зарегистрированы на турнир!")
+            
+            # Показываем обновленную карточку турнира
+            tournament_text = format_tournament_card(tournament, is_participant=True)
+            await callback.message.edit_text(
+                text=tournament_text,
+                reply_markup=get_tournament_card_keyboard(
+                    tournament_id=tournament_id,
+                    tournament_status=tournament.status.value,
+                    is_participant=True,
+                ),
+            )
+            
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при регистрации на турнир {tournament_id}: {e}",
+            )
+            await callback.answer(
+                "Произошла ошибка при регистрации",
+                show_alert=True,
+            )
+    elif callback_data.startswith("tournament_join_team_"):
+        # Вступление в командный турнир с выбранной командой
+        parts = callback_data.replace("tournament_join_team_", "").split("_")
+        if len(parts) < 2:
+            await callback.answer("Ошибка", show_alert=True)
+            return
+        
+        tournament_id = parts[0]
+        team_id = "_".join(parts[1:])  # На случай если team_id содержит подчеркивания
+        
+        if _mongo_client is None:
+            await callback.answer(
+                "Ошибка: база данных недоступна",
+                show_alert=True,
+            )
+            return
+        
+        try:
+            tournament = await _mongo_client.get_tournament(tournament_id)
+            if not tournament:
+                await callback.answer(
+                    "Турнир не найден",
+                    show_alert=True,
+                )
+                return
+            
+            if tournament.format != TournamentFormat.TEAM:
+                await callback.answer(
+                    "Это соло турнир",
+                    show_alert=True,
+                )
+                return
+            
+            # Проверяем, не участвует ли команда уже
+            if team_id in tournament.team_participants:
+                await callback.answer(
+                    "Команда уже участвует в этом турнире",
+                    show_alert=True,
+                )
+                return
+            
+            # Проверяем лимит участников
+            if tournament.participant_limit:
+                if len(tournament.team_participants) >= tournament.participant_limit:
+                    await callback.answer(
+                        "Достигнут лимит команд",
+                        show_alert=True,
+                    )
+                    return
+            
+            # Добавляем команду
+            tournament.team_participants.append(team_id)
+            await _mongo_client.update_tournament(tournament)
+            
+            team = await _mongo_client.get_team(team_id)
+            team_name = team.name if team else team_id
+            
+            await callback.answer(f"✅ Команда {team_name} зарегистрирована на турнир!")
+            
+            # Показываем обновленную карточку турнира
+            user = await _mongo_client.get_user(callback.from_user.id)
+            is_participant = user and user.team_id == team_id and team_id in tournament.team_participants
+            
+            tournament_text = format_tournament_card(tournament, is_participant=is_participant)
+            await callback.message.edit_text(
+                text=tournament_text,
+                reply_markup=get_tournament_card_keyboard(
+                    tournament_id=tournament_id,
+                    tournament_status=tournament.status.value,
+                    is_participant=is_participant,
+                ),
+            )
+            
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при регистрации команды на турнир {tournament_id}: {e}",
+            )
+            await callback.answer(
+                "Произошла ошибка при регистрации",
+                show_alert=True,
+            )
+    elif callback_data.startswith("tournament_rules_"):
+        # Просмотр правил турнира
+        tournament_id = callback_data.replace("tournament_rules_", "")
+        
+        tournament = None
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турнира {tournament_id}: {e}",
+                )
+        
+        if not tournament:
+            await callback.answer("Турнир не найден", show_alert=True)
+            return
+        
+        rules_text = (
+            f"📋 Правила турнира: {tournament.name}\n\n"
+        )
+        
+        if tournament.full_rules:
+            rules_text += tournament.full_rules
+        elif tournament.rules_summary:
+            rules_text += tournament.rules_summary
+        else:
+            rules_text += "Правила не указаны."
+        
+        await callback.answer("Правила турнира")
+        await callback.message.edit_text(
+            text=rules_text,
+            reply_markup=get_tournament_card_keyboard(
+                tournament_id=tournament_id,
+                tournament_status=tournament.status.value,
+                is_participant=False,  # Не проверяем участие для просмотра правил
+            ),
+        )
+    elif callback_data.startswith("tournament_participants_"):
+        # Просмотр участников/команд
+        tournament_id = callback_data.replace("tournament_participants_", "")
+        
+        tournament = None
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турнира {tournament_id}: {e}",
+                )
+        
+        if not tournament:
+            await callback.answer("Турнир не найден", show_alert=True)
+            return
+        
+        participants_text = f"👥 Участники турнира: {tournament.name}\n\n"
+        
+        if tournament.format == TournamentFormat.SOLO:
+            if tournament.solo_participants:
+                participants_text += "Участники:\n"
+                for i, user_id in enumerate(tournament.solo_participants, 1):
+                    user = None
+                    if _mongo_client is not None:
+                        try:
+                            user = await _mongo_client.get_user(user_id)
+                        except Exception:
+                            pass
+                    
+                    user_name = (
+                        user.nickname
+                        or user.username
+                        or f"ID: {user_id}"
+                        if user
+                        else f"ID: {user_id}"
+                    )
+                    participants_text += f"{i}. {user_name}\n"
+            else:
+                participants_text += "Участников пока нет."
+        else:
+            if tournament.team_participants:
+                participants_text += "Команды:\n"
+                for i, team_id in enumerate(tournament.team_participants, 1):
+                    team = None
+                    if _mongo_client is not None:
+                        try:
+                            team = await _mongo_client.get_team(team_id)
+                        except Exception:
+                            pass
+                    
+                    team_name = (
+                        f"{team.name} ({team.tag})"
+                        if team
+                        else f"ID: {team_id}"
+                    )
+                    participants_text += f"{i}. {team_name}\n"
+            else:
+                participants_text += "Команд пока нет."
+        
+        await callback.answer("Участники/Команды")
+        await callback.message.edit_text(
+            text=participants_text,
+            reply_markup=get_tournament_card_keyboard(
+                tournament_id=tournament_id,
+                tournament_status=tournament.status.value,
+                is_participant=False,
+            ),
+        )
+    elif callback_data.startswith("tournament_results_"):
+        # Таблица результатов
+        tournament_id = callback_data.replace("tournament_results_", "")
+        
+        tournament = None
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турнира {tournament_id}: {e}",
+                )
+        
+        if not tournament:
+            await callback.answer("Турнир не найден", show_alert=True)
+            return
+        
+        if tournament.status not in (TournamentStatus.IN_PROGRESS, TournamentStatus.COMPLETED):
+            await callback.answer(
+                "Результаты доступны только для идущих или завершённых турниров",
+                show_alert=True,
+            )
+            return
+        
+        await callback.answer("Таблица результатов")
+        await callback.message.edit_text(
+            text=f"📊 Таблица результатов: {tournament.name}\n\nРаздел в разработке...",
+            reply_markup=get_tournament_card_keyboard(
+                tournament_id=tournament_id,
+                tournament_status=tournament.status.value,
+                is_participant=False,
             ),
         )
     elif callback_data == "menu_back":
