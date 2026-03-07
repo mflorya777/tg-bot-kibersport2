@@ -491,3 +491,204 @@ def get_tournament_team_select_keyboard(
         inline_keyboard=keyboard_rows,
     )
     return keyboard
+
+
+def get_admin_tournaments_list_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для списка турниров в админ-панели.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Создать турнир",
+                    callback_data="admin_tournament_create",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="menu_admin",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_tournament_manage_keyboard(
+    tournament_id: str,
+    has_confirmation: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для управления турниром в админ-панели.
+    
+    Args:
+        tournament_id: ID турнира
+        has_confirmation: Есть ли подтверждение заявок на вступление
+    """
+    keyboard_rows = []
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="👥 Участники/Команды",
+            callback_data=f"admin_tournament_participants_{tournament_id}",
+        ),
+    ])
+    
+    if has_confirmation:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="🧾 Заявки на вступление",
+                callback_data=f"admin_tournament_requests_{tournament_id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="🧮 Результаты",
+            callback_data=f"admin_tournament_results_{tournament_id}",
+        ),
+        InlineKeyboardButton(
+            text="📊 Опубликовать таблицу",
+            callback_data=f"admin_tournament_publish_{tournament_id}",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="📣 Сообщение участникам",
+            callback_data=f"admin_tournament_message_{tournament_id}",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="🛑 Закрыть регистрацию",
+            callback_data=f"admin_tournament_close_reg_{tournament_id}",
+        ),
+        InlineKeyboardButton(
+            text="🏁 Завершить турнир",
+            callback_data=f"admin_tournament_finish_{tournament_id}",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_tournaments",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_tournament_format_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора формата турнира.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="👤 Соло",
+                    callback_data="tournament_create_format_solo",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👥 Команды",
+                    callback_data="tournament_create_format_team",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_tournament_join_type_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора типа вступления в турнир.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🌐 Все",
+                    callback_data="tournament_create_join_all",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📩 По приглашению",
+                    callback_data="tournament_create_join_invite",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✅ Только подтверждённые команды",
+                    callback_data="tournament_create_join_confirmed",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_tournament_team_scoring_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора формулы подсчёта очков команды.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Сумма",
+                    callback_data="tournament_create_scoring_sum",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏆 Топ-N",
+                    callback_data="tournament_create_scoring_topn",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📊 Среднее",
+                    callback_data="tournament_create_scoring_avg",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_tournament_review_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для проверки данных турнира перед публикацией.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Опубликовать",
+                    callback_data="tournament_create_publish",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✏️ Изменить",
+                    callback_data="tournament_create_edit",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="tournament_create_cancel",
+                ),
+            ],
+        ],
+    )
+    return keyboard

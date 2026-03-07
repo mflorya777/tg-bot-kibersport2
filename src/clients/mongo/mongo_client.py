@@ -321,3 +321,25 @@ class MongoClient:
                 f"Ошибка при обновлении турнира {tournament.id} в MongoDB: {e}",
             )
             raise
+
+    async def create_tournament(
+        self,
+        tournament: Tournament,
+    ) -> Tournament:
+        """
+        Создает новый турнир в базе данных.
+        
+        Args:
+            tournament: Объект турнира для создания
+        
+        Returns:
+            Созданный объект турнира
+        """
+        try:
+            await self.tournaments_collection.insert_one(tournament.model_dump())
+            return tournament
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при создании турнира {tournament.id} в MongoDB: {e}",
+            )
+            raise

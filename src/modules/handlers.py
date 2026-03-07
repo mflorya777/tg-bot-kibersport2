@@ -16,6 +16,12 @@ from src.modules.keyboards import (
     get_tournament_card_keyboard,
     get_tournament_join_confirm_keyboard,
     get_tournament_team_select_keyboard,
+    get_admin_tournaments_list_keyboard,
+    get_admin_tournament_manage_keyboard,
+    get_tournament_format_keyboard,
+    get_tournament_join_type_keyboard,
+    get_tournament_team_scoring_keyboard,
+    get_tournament_review_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -37,6 +43,9 @@ _LOG = logging.getLogger("kibersport-tg-bot")
 # Словарь для хранения состояния ожидания данных команды
 _waiting_team_data: dict[int, bool] = {}
 
+# Словарь для хранения данных создания турнира
+_tournament_creation_data: dict[int, dict] = {}
+
 
 def generate_team_id() -> str:
     """
@@ -46,6 +55,16 @@ def generate_team_id() -> str:
         Уникальный ID команды
     """
     return f"team_{secrets.token_urlsafe(12)}"
+
+
+def generate_tournament_id() -> str:
+    """
+    Генерирует уникальный ID турнира.
+    
+    Returns:
+        Уникальный ID турнира
+    """
+    return f"tournament_{secrets.token_urlsafe(12)}"
 
 
 def generate_invite_code() -> str:
@@ -1240,11 +1259,36 @@ async def admin_callback_handler(
     
     if callback_data == "admin_tournaments":
         await callback.answer("Турниры")
+        
+        # Получаем список турниров
+        tournaments = []
+        if _mongo_client is not None:
+            try:
+                tournaments = await _mongo_client.get_tournaments()
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турниров: {e}",
+                )
+        
+        tournaments_text = "🏆 Турниры (админ-панель)\n\n"
+        if tournaments:
+            tournaments_text += f"Всего турниров: {len(tournaments)}\n\n"
+            for i, tournament in enumerate(tournaments[:5], 1):  # Показываем первые 5
+                status_emoji = {
+                    TournamentStatus.REGISTRATION_OPEN: "✅",
+                    TournamentStatus.IN_PROGRESS: "🔄",
+                    TournamentStatus.COMPLETED: "🏁",
+                }
+                emoji = status_emoji.get(tournament.status, "🏆")
+                tournaments_text += f"{i}. {emoji} {tournament.name}\n"
+            if len(tournaments) > 5:
+                tournaments_text += f"\n... и ещё {len(tournaments) - 5} турниров"
+        else:
+            tournaments_text += "Турниров пока нет."
+        
         await callback.message.edit_text(
-            text="🏆 Турниры\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
-            ),
+            text=tournaments_text,
+            reply_markup=get_admin_tournaments_list_keyboard(),
         )
     elif callback_data == "admin_results":
         await callback.answer("Результаты")
@@ -1329,6 +1373,223 @@ async def admin_callback_handler(
                 is_super_admin=is_super_admin,
             ),
         )
+    elif callback_data == "admin_tournament_create":
+        # Проверка прав: только ADMIN и SUPER_ADMIN могут создавать турниры
+        if user_role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
+            await callback.answer(
+                "❌ Только админы могут создавать турниры",
+                show_alert=True,
+            )
+            return
+        
+        await callback.answer("Создание турнира")
+        
+        # Инициализируем данные создания турнира
+        _tournament_creation_data[callback.from_user.id] = {
+            "step": "name",
+            "data": {},
+        }
+        
+        await callback.message.edit_text(
+            text="🏆 Создание турнира\n\n"
+                 "Шаг 1/9: Название турнира\n\n"
+                 "Введите название турнира:\n\n"
+                 "Или отправьте /cancel для отмены.",
+            reply_markup=None,
+        )
+    elif callback_data.startswith("admin_tournament_"):
+        # Обработка действий с турниром в админ-панели
+        tournament_id = callback_data.replace("admin_tournament_", "").split("_")[0]
+        action = "_".join(callback_data.replace("admin_tournament_", "").split("_")[1:])
+        
+        tournament = None
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+            except Exception as e:
+                _LOG.error(
+                    f"Ошибка при получении турнира {tournament_id}: {e}",
+                )
+        
+        if not tournament:
+            await callback.answer("Турнир не найден", show_alert=True)
+            return
+        
+        if action == "participants":
+            await callback.answer("Участники/Команды")
+            # Показываем участников (аналогично обычному просмотру)
+            participants_text = f"👥 Участники турнира: {tournament.name}\n\n"
+            if tournament.format == TournamentFormat.SOLO:
+                if tournament.solo_participants:
+                    participants_text += f"Участников: {len(tournament.solo_participants)}\n"
+                else:
+                    participants_text += "Участников пока нет."
+            else:
+                if tournament.team_participants:
+                    participants_text += f"Команд: {len(tournament.team_participants)}\n"
+                else:
+                    participants_text += "Команд пока нет."
+            
+            await callback.message.edit_text(
+                text=participants_text,
+                reply_markup=get_admin_tournament_manage_keyboard(
+                    tournament_id=tournament_id,
+                    has_confirmation=False,  # TODO: определить из данных турнира
+                ),
+            )
+        elif action == "results":
+            await callback.answer("Результаты")
+            await callback.message.edit_text(
+                text=f"🧮 Результаты турнира: {tournament.name}\n\nРаздел в разработке...",
+                reply_markup=get_admin_tournament_manage_keyboard(
+                    tournament_id=tournament_id,
+                    has_confirmation=False,
+                ),
+            )
+        elif action == "publish":
+            await callback.answer("Опубликовать таблицу")
+            await callback.message.edit_text(
+                text=f"📊 Опубликовать таблицу: {tournament.name}\n\nРаздел в разработке...",
+                reply_markup=get_admin_tournament_manage_keyboard(
+                    tournament_id=tournament_id,
+                    has_confirmation=False,
+                ),
+            )
+        elif action == "message":
+            await callback.answer("Сообщение участникам")
+            await callback.message.edit_text(
+                text=f"📣 Сообщение участникам: {tournament.name}\n\nРаздел в разработке...",
+                reply_markup=get_admin_tournament_manage_keyboard(
+                    tournament_id=tournament_id,
+                    has_confirmation=False,
+                ),
+            )
+        elif action == "close_reg":
+            await callback.answer("Закрыть регистрацию")
+            if tournament.status == TournamentStatus.REGISTRATION_OPEN:
+                tournament.status = TournamentStatus.IN_PROGRESS
+                await _mongo_client.update_tournament(tournament)
+                await callback.answer("✅ Регистрация закрыта", show_alert=True)
+            else:
+                await callback.answer("Регистрация уже закрыта", show_alert=True)
+        elif action == "finish":
+            await callback.answer("Завершить турнир")
+            if tournament.status != TournamentStatus.COMPLETED:
+                tournament.status = TournamentStatus.COMPLETED
+                if not tournament.end_date:
+                    tournament.end_date = dt.datetime.now(tz=MOSCOW_TZ)
+                await _mongo_client.update_tournament(tournament)
+                await callback.answer("✅ Турнир завершён", show_alert=True)
+            else:
+                await callback.answer("Турнир уже завершён", show_alert=True)
+    elif callback_data.startswith("tournament_create_"):
+        # Обработка шагов создания турнира
+        user_id = callback.from_user.id
+        
+        if user_id not in _tournament_creation_data:
+            await callback.answer("Создание турнира не начато", show_alert=True)
+            return
+        
+        creation_data = _tournament_creation_data[user_id]
+        step = creation_data["step"]
+        data = creation_data["data"]
+        
+        if callback_data == "tournament_create_format_solo":
+            data["format"] = TournamentFormat.SOLO
+            creation_data["step"] = "dates"
+            await callback.message.edit_text(
+                text="🏆 Создание турнира\n\n"
+                     "Шаг 4/9: Даты турнира\n\n"
+                     "Введите даты в формате:\n"
+                     "<b>ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ</b>\n\n"
+                     "1. Старт регистрации\n"
+                     "2. Конец регистрации\n"
+                     "3. Старт турнира\n"
+                     "4. Конец турнира (опционально, можно пропустить)\n\n"
+                     "Пример: <code>01.01.2025 12:00 | 10.01.2025 12:00 | 15.01.2025 10:00 | 20.01.2025 18:00</code>\n\n"
+                     "Или отправьте /cancel для отмены.",
+                reply_markup=None,
+            )
+        elif callback_data == "tournament_create_format_team":
+            data["format"] = TournamentFormat.TEAM
+            creation_data["step"] = "dates"
+            await callback.message.edit_text(
+                text="🏆 Создание турнира\n\n"
+                     "Шаг 4/9: Даты турнира\n\n"
+                     "Введите даты в формате:\n"
+                     "<b>ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ</b>\n\n"
+                     "1. Старт регистрации\n"
+                     "2. Конец регистрации\n"
+                     "3. Старт турнира\n"
+                     "4. Конец турнира (опционально, можно пропустить)\n\n"
+                     "Пример: <code>01.01.2025 12:00 | 10.01.2025 12:00 | 15.01.2025 10:00 | 20.01.2025 18:00</code>\n\n"
+                     "Или отправьте /cancel для отмены.",
+                reply_markup=None,
+            )
+        elif callback_data == "tournament_create_join_all":
+            data["join_type"] = "all"
+            creation_data["step"] = "review"
+            await _show_tournament_review(callback, data)
+        elif callback_data == "tournament_create_join_invite":
+            data["join_type"] = "invite"
+            creation_data["step"] = "review"
+            await _show_tournament_review(callback, data)
+        elif callback_data == "tournament_create_join_confirmed":
+            data["join_type"] = "confirmed"
+            creation_data["step"] = "review"
+            await _show_tournament_review(callback, data)
+        elif callback_data == "tournament_create_scoring_sum":
+            data["scoring_formula"] = "sum"
+            creation_data["step"] = "join_type"
+            await callback.message.edit_text(
+                text="🏆 Создание турнира\n\n"
+                     "Шаг 9/9: Кто может вступать\n\n"
+                     "Выберите тип вступления:",
+                reply_markup=get_tournament_join_type_keyboard(),
+            )
+        elif callback_data == "tournament_create_scoring_topn":
+            data["scoring_formula"] = "topn"
+            creation_data["step"] = "join_type"
+            await callback.message.edit_text(
+                text="🏆 Создание турнира\n\n"
+                     "Шаг 9/9: Кто может вступать\n\n"
+                     "Выберите тип вступления:",
+                reply_markup=get_tournament_join_type_keyboard(),
+            )
+        elif callback_data == "tournament_create_scoring_avg":
+            data["scoring_formula"] = "avg"
+            creation_data["step"] = "join_type"
+            await callback.message.edit_text(
+                text="🏆 Создание турнира\n\n"
+                     "Шаг 9/9: Кто может вступать\n\n"
+                     "Выберите тип вступления:",
+                reply_markup=get_tournament_join_type_keyboard(),
+            )
+        elif callback_data == "tournament_create_publish":
+            # Публикуем турнир
+            if _mongo_client is None:
+                await callback.answer("Ошибка: база данных недоступна", show_alert=True)
+                return
+            
+            try:
+                tournament = await _create_tournament_from_data(data)
+                await _mongo_client.create_tournament(tournament)
+                _tournament_creation_data.pop(user_id, None)
+                await callback.answer("✅ Турнир создан и опубликован!", show_alert=True)
+                await callback.message.edit_text(
+                    text=f"✅ Турнир '{tournament.name}' успешно создан и опубликован!",
+                    reply_markup=get_admin_tournaments_list_keyboard(),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при создании турнира: {e}")
+                await callback.answer("Ошибка при создании турнира", show_alert=True)
+        elif callback_data == "tournament_create_cancel":
+            _tournament_creation_data.pop(user_id, None)
+            await callback.answer("Создание турнира отменено")
+            await callback.message.edit_text(
+                text="❌ Создание турнира отменено",
+                reply_markup=get_admin_tournaments_list_keyboard(),
+            )
     elif callback_data == "admin_settings":
         # Дополнительная проверка: только супер-админ может изменять настройки
         if user_role != UserRole.SUPER_ADMIN:
@@ -1501,4 +1762,336 @@ async def team_create_message_handler(
         await message.answer(
             "❌ Произошла ошибка при создании команды. Попробуйте позже.",
             reply_markup=get_team_no_team_keyboard(),
+        )
+
+
+async def _show_tournament_review(
+    callback: types.CallbackQuery,
+    data: dict,
+) -> None:
+    """
+    Показывает экран проверки данных турнира перед публикацией.
+    """
+    review_text = "🏆 Проверьте данные турнира:\n\n"
+    
+    review_text += f"📝 Название: {data.get('name', 'Не указано')}\n"
+    review_text += f"🎮 Игра: {data.get('game_discipline', 'Не указано')}\n"
+    
+    format_text = "👤 Соло" if data.get('format') == TournamentFormat.SOLO else "👥 Команды"
+    review_text += f"📋 Формат: {format_text}\n"
+    
+    if data.get('registration_start'):
+        review_text += f"📅 Регистрация: {data['registration_start'].strftime('%d.%m.%Y %H:%M')} - {data['registration_end'].strftime('%d.%m.%Y %H:%M')}\n"
+    if data.get('start_date'):
+        review_text += f"🚀 Старт: {data['start_date'].strftime('%d.%m.%Y %H:%M')}\n"
+    if data.get('end_date'):
+        review_text += f"🏁 Финиш: {data['end_date'].strftime('%d.%m.%Y %H:%M')}\n"
+    
+    if data.get('participant_limit'):
+        review_text += f"👥 Лимит: {data['participant_limit']}\n"
+    
+    if data.get('scoring_formula'):
+        scoring_text = {
+            "sum": "Сумма",
+            "topn": "Топ-N",
+            "avg": "Среднее",
+        }
+        review_text += f"📊 Формула подсчёта: {scoring_text.get(data['scoring_formula'], data['scoring_formula'])}\n"
+    
+    if data.get('prizes'):
+        review_text += f"🎁 Призы: {data['prizes']}\n"
+    
+    if data.get('rules_summary'):
+        review_text += f"📝 Правила: {data['rules_summary']}\n"
+    
+    join_type_text = {
+        "all": "🌐 Все",
+        "invite": "📩 По приглашению",
+        "confirmed": "✅ Только подтверждённые команды",
+    }
+    review_text += f"🔐 Тип вступления: {join_type_text.get(data.get('join_type'), 'Не указано')}\n"
+    
+    await callback.message.edit_text(
+        text=review_text,
+        reply_markup=get_tournament_review_keyboard(),
+    )
+
+
+async def _create_tournament_from_data(
+    data: dict,
+) -> Tournament:
+    """
+    Создает объект Tournament из данных создания.
+    """
+    tournament_id = generate_tournament_id()
+    
+    return Tournament(
+        id=tournament_id,
+        name=data["name"],
+        game_discipline=data["game_discipline"],
+        registration_start=data["registration_start"],
+        registration_end=data["registration_end"],
+        start_date=data["start_date"],
+        end_date=data.get("end_date"),
+        format=data["format"],
+        status=TournamentStatus.REGISTRATION_OPEN,
+        entry_fee=data.get("entry_fee"),
+        prizes=data.get("prizes"),
+        participant_limit=data.get("participant_limit"),
+        rules_summary=data.get("rules_summary"),
+        full_rules=data.get("full_rules"),
+    )
+
+
+async def tournament_create_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик текстовых сообщений для пошагового создания турнира.
+    """
+    user_id = message.from_user.id
+    
+    # Проверяем, создаётся ли турнир
+    if user_id not in _tournament_creation_data:
+        return
+    
+    # Проверяем, что это текстовое сообщение
+    if not message.text:
+        return
+    
+    creation_data = _tournament_creation_data[user_id]
+    step = creation_data["step"]
+    data = creation_data["data"]
+    text = message.text.strip()
+    
+    _LOG.debug(
+        f"Обработка шага создания турнира: user_id={user_id}, step={step}, text={text[:50]}",
+    )
+    
+    # Проверяем команду /cancel
+    if text.lower() == "/cancel":
+        _tournament_creation_data.pop(user_id, None)
+        await message.answer(
+            "❌ Создание турнира отменено",
+            reply_markup=get_admin_tournaments_list_keyboard(),
+        )
+        return
+    
+    try:
+        if step == "name":
+            if not text or len(text) < 3:
+                await message.answer(
+                    "❌ Название турнира должно содержать минимум 3 символа.\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            data["name"] = text
+            creation_data["step"] = "game_discipline"
+            _LOG.info(
+                f"Пользователь {user_id} ввёл название турнира: {text}, переход к шагу game_discipline",
+            )
+            await message.answer(
+                "🏆 Создание турнира\n\n"
+                "Шаг 2/9: Игра/дисциплина\n\n"
+                "Введите название игры или дисциплины:\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+        
+        elif step == "game_discipline":
+            if not text:
+                await message.answer(
+                    "❌ Игра/дисциплина не может быть пустой.\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            data["game_discipline"] = text
+            creation_data["step"] = "format"
+            await message.answer(
+                "🏆 Создание турнира\n\n"
+                "Шаг 3/9: Формат турнира\n\n"
+                "Выберите формат:",
+                reply_markup=get_tournament_format_keyboard(),
+            )
+        
+        elif step == "dates":
+            # Парсим даты: "ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ"
+            parts = [p.strip() for p in text.split("|")]
+            if len(parts) < 3:
+                await message.answer(
+                    "❌ Неверный формат дат!\n\n"
+                    "Нужно ввести минимум 3 даты через символ <b>|</b> (вертикальная черта).\n\n"
+                    "Формат:\n"
+                    "<b>ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ</b>\n\n"
+                    "1. Старт регистрации\n"
+                    "2. Конец регистрации\n"
+                    "3. Старт турнира\n"
+                    "4. Конец турнира (опционально, можно пропустить)\n\n"
+                    "Пример:\n"
+                    "<code>01.01.2025 12:00 | 10.01.2025 12:00 | 15.01.2025 10:00 | 20.01.2025 18:00</code>\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            try:
+                reg_start = dt.datetime.strptime(parts[0], "%d.%m.%Y %H:%M")
+                reg_end = dt.datetime.strptime(parts[1], "%d.%m.%Y %H:%M")
+                start_date = dt.datetime.strptime(parts[2], "%d.%m.%Y %H:%M")
+                end_date = None
+                if len(parts) >= 4 and parts[3].strip():
+                    end_date = dt.datetime.strptime(parts[3].strip(), "%d.%m.%Y %H:%M")
+                
+                # Добавляем часовой пояс
+                reg_start = reg_start.replace(tzinfo=MOSCOW_TZ)
+                reg_end = reg_end.replace(tzinfo=MOSCOW_TZ)
+                start_date = start_date.replace(tzinfo=MOSCOW_TZ)
+                if end_date:
+                    end_date = end_date.replace(tzinfo=MOSCOW_TZ)
+                
+                data["registration_start"] = reg_start
+                data["registration_end"] = reg_end
+                data["start_date"] = start_date
+                if end_date:
+                    data["end_date"] = end_date
+                
+                creation_data["step"] = "participant_limit"
+                await message.answer(
+                    "🏆 Создание турнира\n\n"
+                    "Шаг 5/9: Лимит участников/команд\n\n"
+                    "Введите лимит участников (или 0 для безлимита):\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+            except ValueError as e:
+                await message.answer(
+                    f"❌ Ошибка при парсинге дат: {e}\n\n"
+                    "Используйте формат: ДД.ММ.ГГГГ ЧЧ:ММ\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+        
+        elif step == "participant_limit":
+            try:
+                limit = int(text)
+                if limit < 0:
+                    raise ValueError
+                data["participant_limit"] = limit if limit > 0 else None
+            except ValueError:
+                await message.answer(
+                    "❌ Введите корректное число (0 для безлимита).\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            creation_data["step"] = "scoring"
+            if data["format"] == TournamentFormat.SOLO:
+                await message.answer(
+                    "🏆 Создание турнира\n\n"
+                    "Шаг 6/9: Правила подсчёта\n\n"
+                    "Введите правила подсчёта для соло турнира:\n"
+                    "Например: <code>Игрок: киллы</code>\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+            else:
+                await message.answer(
+                    "🏆 Создание турнира\n\n"
+                    "Шаг 6/9: Правила подсчёта\n\n"
+                    "Выберите формулу подсчёта очков команды:",
+                    reply_markup=get_tournament_team_scoring_keyboard(),
+                )
+        
+        elif step == "scoring":
+            # Для соло турнира правила подсчёта вводятся текстом
+            if data["format"] == TournamentFormat.SOLO:
+                if not text:
+                    await message.answer(
+                        "❌ Правила подсчёта не могут быть пустыми.\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+                    return
+                data["rules_summary"] = text
+                creation_data["step"] = "prizes"
+                await message.answer(
+                    "🏆 Создание турнира\n\n"
+                    "Шаг 7/9: Призы\n\n"
+                    "Введите описание призов (или 'нет' для пропуска):\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+            else:
+                # Для командного турнира формула уже выбрана через callback
+                # Этот шаг не должен достигаться для командных турниров
+                creation_data["step"] = "prizes"
+                await message.answer(
+                    "🏆 Создание турнира\n\n"
+                    "Шаг 7/9: Призы\n\n"
+                    "Введите описание призов (или 'нет' для пропуска):\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+        
+        elif step == "prizes":
+            if text.lower() in ("нет", "no", "н"):
+                data["prizes"] = None
+            else:
+                data["prizes"] = text
+            
+            creation_data["step"] = "rules"
+            await message.answer(
+                "🏆 Создание турнира\n\n"
+                "Шаг 8/9: Описание/правила\n\n"
+                "Введите краткое описание правил турнира:\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+        
+        elif step == "rules":
+            data["rules_summary"] = text
+            creation_data["step"] = "review"
+            # Показываем review экран
+            review_text = "🏆 Проверьте данные турнира:\n\n"
+            
+            review_text += f"📝 Название: {data.get('name', 'Не указано')}\n"
+            review_text += f"🎮 Игра: {data.get('game_discipline', 'Не указано')}\n"
+            
+            format_text = "👤 Соло" if data.get('format') == TournamentFormat.SOLO else "👥 Команды"
+            review_text += f"📋 Формат: {format_text}\n"
+            
+            if data.get('registration_start'):
+                review_text += f"📅 Регистрация: {data['registration_start'].strftime('%d.%m.%Y %H:%M')} - {data['registration_end'].strftime('%d.%m.%Y %H:%M')}\n"
+            if data.get('start_date'):
+                review_text += f"🚀 Старт: {data['start_date'].strftime('%d.%m.%Y %H:%M')}\n"
+            if data.get('end_date'):
+                review_text += f"🏁 Финиш: {data['end_date'].strftime('%d.%m.%Y %H:%M')}\n"
+            
+            if data.get('participant_limit'):
+                review_text += f"👥 Лимит: {data['participant_limit']}\n"
+            
+            if data.get('scoring_formula'):
+                scoring_text = {
+                    "sum": "Сумма",
+                    "topn": "Топ-N",
+                    "avg": "Среднее",
+                }
+                review_text += f"📊 Формула подсчёта: {scoring_text.get(data['scoring_formula'], data['scoring_formula'])}\n"
+            
+            if data.get('prizes'):
+                review_text += f"🎁 Призы: {data['prizes']}\n"
+            
+            if data.get('rules_summary'):
+                review_text += f"📝 Правила: {data['rules_summary']}\n"
+            
+            join_type_text = {
+                "all": "🌐 Все",
+                "invite": "📩 По приглашению",
+                "confirmed": "✅ Только подтверждённые команды",
+            }
+            review_text += f"🔐 Тип вступления: {join_type_text.get(data.get('join_type'), 'Не указано')}\n"
+            
+            await message.answer(
+                text=review_text,
+                reply_markup=get_tournament_review_keyboard(),
+            )
+        
+    except Exception as e:
+        _LOG.error(f"Ошибка при обработке шага создания турнира: {e}")
+        await message.answer(
+            "❌ Произошла ошибка. Попробуйте снова или отправьте /cancel для отмены.",
         )
