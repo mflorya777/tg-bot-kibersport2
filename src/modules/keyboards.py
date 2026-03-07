@@ -693,3 +693,127 @@ def get_tournament_review_keyboard() -> InlineKeyboardMarkup:
         ],
     )
     return keyboard
+
+
+def get_ratings_type_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора типа рейтинга.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🧑 Рейтинг игроков",
+                    callback_data="ratings_players",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👥 Рейтинг команд",
+                    callback_data="ratings_teams",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="menu_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_ratings_filter_keyboard(
+    rating_type: str,
+    current_filter: str = "all_time",
+    current_tournament: Optional[str] = None,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для фильтров рейтинга.
+    
+    Args:
+        rating_type: Тип рейтинга (players или teams)
+        current_filter: Текущий фильтр (all_time, season, month, tournament)
+        current_tournament: ID текущего выбранного турнира (если фильтр по турниру)
+    """
+    keyboard_rows = []
+    
+    # Фильтры по времени
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ За всё время" if current_filter == "all_time" else "За всё время",
+            callback_data=f"ratings_filter_{rating_type}_all_time",
+        ),
+    ])
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ За сезон" if current_filter == "season" else "За сезон",
+            callback_data=f"ratings_filter_{rating_type}_season",
+        ),
+    ])
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ За месяц" if current_filter == "month" else "За месяц",
+            callback_data=f"ratings_filter_{rating_type}_month",
+        ),
+    ])
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ По турниру" if current_filter == "tournament" else "По турниру",
+            callback_data=f"ratings_filter_{rating_type}_tournament",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="🔎 Найти себя",
+            callback_data=f"ratings_find_{rating_type}",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="ratings_type",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_ratings_tournament_select_keyboard(
+    rating_type: str,
+    tournaments: list[Tournament],
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора турнира при фильтрации рейтинга.
+    
+    Args:
+        rating_type: Тип рейтинга (players или teams)
+        tournaments: Список турниров для выбора
+    """
+    keyboard_rows = []
+    
+    for tournament in tournaments[:10]:  # Максимум 10 турниров
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"🏆 {tournament.name}",
+                callback_data=f"ratings_tournament_{rating_type}_{tournament.id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data=f"ratings_{rating_type}",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard

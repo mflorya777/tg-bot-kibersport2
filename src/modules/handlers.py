@@ -22,6 +22,9 @@ from src.modules.keyboards import (
     get_tournament_join_type_keyboard,
     get_tournament_team_scoring_keyboard,
     get_tournament_review_keyboard,
+    get_ratings_type_keyboard,
+    get_ratings_filter_keyboard,
+    get_ratings_tournament_select_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -241,6 +244,115 @@ async def format_team_text(
         lines.append(f"📈 Место в рейтинге: #{rating_position}")
     else:
         lines.append("📈 Место в рейтинге: не определено")
+    
+    return "\n".join(lines)
+
+
+def format_players_rating(
+    players: list[User],
+    filter_text: str = "За всё время",
+    user_position: Optional[int] = None,
+) -> str:
+    """
+    Форматирует таблицу рейтинга игроков.
+    
+    Args:
+        players: Список игроков
+        filter_text: Текст фильтра для отображения
+        user_position: Позиция текущего пользователя (опционально)
+    
+    Returns:
+        Отформатированный текст рейтинга
+    """
+    lines = [f"🧑 Рейтинг игроков\n"]
+    lines.append(f"📊 Фильтр: {filter_text}\n")
+    
+    if not players:
+        lines.append("Рейтинг пуст")
+        return "\n".join(lines)
+    
+    # Заголовок таблицы
+    lines.append("<b>Место | Ник | Киллы | Турниров</b>")
+    lines.append("─" * 30)
+    
+    # Отображаем топ-20
+    for idx, player in enumerate(players[:20], start=1):
+        nickname = player.nickname or f"ID:{player.id}"
+        kills = player.total_kills or 0
+        tournaments = player.tournaments_played or 0
+        
+        # Выделяем позицию пользователя
+        marker = "👉 " if user_position and idx == user_position else ""
+        lines.append(
+            f"{marker}{idx}. {nickname} | {kills} | {tournaments}",
+        )
+    
+    if len(players) > 20:
+        lines.append(f"\n... и ещё {len(players) - 20} игроков")
+    
+    if user_position and user_position > 20 and user_position <= len(players):
+        user = players[user_position - 1]
+        nickname = user.nickname or f"ID:{user.id}"
+        kills = user.total_kills or 0
+        tournaments = user.tournaments_played or 0
+        lines.append(
+            f"\n👉 {user_position}. {nickname} | {kills} | {tournaments}",
+        )
+    
+    return "\n".join(lines)
+
+
+def format_teams_rating(
+    teams: list[Team],
+    filter_text: str = "За всё время",
+    team_position: Optional[int] = None,
+) -> str:
+    """
+    Форматирует таблицу рейтинга команд.
+    
+    Args:
+        teams: Список команд
+        filter_text: Текст фильтра для отображения
+        team_position: Позиция текущей команды (опционально)
+    
+    Returns:
+        Отформатированный текст рейтинга
+    """
+    lines = [f"👥 Рейтинг команд\n"]
+    lines.append(f"📊 Фильтр: {filter_text}\n")
+    
+    if not teams:
+        lines.append("Рейтинг пуст")
+        return "\n".join(lines)
+    
+    # Заголовок таблицы
+    lines.append("<b>Место | Команда | Очки | Турниров</b>")
+    lines.append("─" * 30)
+    
+    # Отображаем топ-20
+    for idx, team in enumerate(teams[:20], start=1):
+        team_name = f"{team.name} ({team.tag})"
+        points = team.total_points or 0
+        tournaments = team.tournaments_played or 0
+        
+        # Выделяем позицию команды
+        marker = "👉 " if team_position and idx == team_position else ""
+        lines.append(
+            f"{marker}{idx}. {team_name} | {points} | {tournaments}",
+        )
+    
+    if len(teams) > 20:
+        lines.append(f"\n... и ещё {len(teams) - 20} команд")
+    
+    if team_position and team_position > 20:
+        team = teams[team_position - 1] if team_position <= len(teams) else None
+        if team:
+            team_name = f"{team.name} ({team.tag})"
+            points = team.total_points or 0
+            tournaments = team.tournaments_played or 0
+            lines.append(
+                f"\n👉 {team_position}. {team_name} | {points} | {tournaments}",
+            )
     
     return "\n".join(lines)
 
@@ -521,13 +633,80 @@ async def callback_handler(
                 available_games=available_games,
             ),
         )
-    elif callback_data == "menu_ratings":
+    elif callback_data == "menu_ratings" or callback_data == "ratings_type":
         await callback.answer("Рейтинги")
         await callback.message.edit_text(
-            text="📊 Рейтинги\n\nРаздел в разработке...",
-            reply_markup=get_main_menu_keyboard(
-                show_admin=show_admin,
+            text="📊 Рейтинги\n\nВыберите тип рейтинга:",
+            reply_markup=get_ratings_type_keyboard(),
+        )
+    elif callback_data == "ratings_players":
+        await callback.answer("Рейтинг игроков")
+        # Показываем фильтры для рейтинга игроков
+        await callback.message.edit_text(
+            text="🧑 Рейтинг игроков\n\nВыберите фильтр:",
+            reply_markup=get_ratings_filter_keyboard(
+                rating_type="players",
+                current_filter="all_time",
             ),
+        )
+    elif callback_data == "ratings_teams":
+        await callback.answer("Рейтинг команд")
+        # Показываем фильтры для рейтинга команд
+        await callback.message.edit_text(
+            text="👥 Рейтинг команд\n\nВыберите фильтр:",
+            reply_markup=get_ratings_filter_keyboard(
+                rating_type="teams",
+                current_filter="all_time",
+            ),
+        )
+    elif callback_data.startswith("ratings_filter_"):
+        # Обработка фильтров рейтинга
+        parts = callback_data.replace("ratings_filter_", "").split("_", 1)
+        if len(parts) == 2:
+            rating_type = parts[0]  # players или teams
+            filter_type = parts[1]  # all_time, season, month, tournament
+            
+            if filter_type == "tournament":
+                # Показываем список турниров для выбора
+                tournaments = []
+                if _mongo_client is not None:
+                    try:
+                        tournaments = await _mongo_client.get_tournaments()
+                    except Exception as e:
+                        _LOG.error(f"Ошибка при получении турниров: {e}")
+                
+                await callback.message.edit_text(
+                    text=f"{'🧑' if rating_type == 'players' else '👥'} Рейтинг {'игроков' if rating_type == 'players' else 'команд'}\n\nВыберите турнир:",
+                    reply_markup=get_ratings_tournament_select_keyboard(
+                        rating_type=rating_type,
+                        tournaments=tournaments,
+                    ),
+                )
+            else:
+                # Показываем рейтинг с выбранным фильтром
+                await _show_rating(
+                    callback=callback,
+                    rating_type=rating_type,
+                    filter_type=filter_type,
+                )
+    elif callback_data.startswith("ratings_tournament_"):
+        # Выбран турнир для фильтрации
+        parts = callback_data.replace("ratings_tournament_", "").split("_", 1)
+        if len(parts) == 2:
+            rating_type = parts[0]
+            tournament_id = parts[1]
+            await _show_rating(
+                callback=callback,
+                rating_type=rating_type,
+                filter_type="tournament",
+                tournament_id=tournament_id,
+            )
+    elif callback_data.startswith("ratings_find_"):
+        # Кнопка "Найти себя"
+        rating_type = callback_data.replace("ratings_find_", "")
+        await _find_user_in_rating(
+            callback=callback,
+            rating_type=rating_type,
         )
     elif callback_data == "menu_bonuses":
         await callback.answer("Бонусы")
@@ -1825,6 +2004,197 @@ async def _create_tournament_from_data(
         rules_summary=data.get("rules_summary"),
         full_rules=data.get("full_rules"),
     )
+
+
+async def _show_rating(
+    callback: types.CallbackQuery,
+    rating_type: str,
+    filter_type: str,
+    tournament_id: Optional[str] = None,
+) -> None:
+    """
+    Показывает рейтинг игроков или команд.
+    
+    Args:
+        callback: Callback query
+        rating_type: Тип рейтинга (players или teams)
+        filter_type: Тип фильтра (all_time, season, month, tournament)
+        tournament_id: ID турнира (если filter_type == "tournament")
+    """
+    filter_texts = {
+        "all_time": "За всё время",
+        "season": "За сезон",
+        "month": "За месяц",
+        "tournament": "По турниру",
+    }
+    filter_text = filter_texts.get(filter_type, "За всё время")
+    
+    # Если выбран турнир, получаем его название
+    tournament_name = None
+    if filter_type == "tournament" and tournament_id and _mongo_client is not None:
+        try:
+            tournament = await _mongo_client.get_tournament(tournament_id)
+            if tournament:
+                tournament_name = tournament.name
+                filter_text = f"По турниру: {tournament_name}"
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении турнира {tournament_id}: {e}")
+    
+    user_id = callback.from_user.id
+    user_position = None
+    team_position = None
+    
+    if rating_type == "players":
+        # Получаем рейтинг игроков
+        players = []
+        if _mongo_client is not None:
+            try:
+                players = await _mongo_client.get_players_rating(
+                    filter_type=filter_type,
+                    tournament_id=tournament_id,
+                )
+                user_position = await _mongo_client.get_user_rating_position(
+                    user_id=user_id,
+                    filter_type=filter_type,
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении рейтинга игроков: {e}")
+        
+        rating_text = format_players_rating(
+            players=players,
+            filter_text=filter_text,
+            user_position=user_position,
+        )
+    else:
+        # Получаем рейтинг команд
+        teams = []
+        user_team_id = None
+        if _mongo_client is not None:
+            try:
+                teams = await _mongo_client.get_teams_rating(
+                    filter_type=filter_type,
+                    tournament_id=tournament_id,
+                )
+                # Получаем команду пользователя для определения позиции
+                user_team = await _mongo_client.get_user_team(user_id)
+                if user_team:
+                    user_team_id = user_team.id
+                    team_position = await _mongo_client.get_team_rating_position(
+                        team_id=user_team_id,
+                        filter_type=filter_type,
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении рейтинга команд: {e}")
+        
+        rating_text = format_teams_rating(
+            teams=teams,
+            filter_text=filter_text,
+            team_position=team_position,
+        )
+    
+    await callback.message.edit_text(
+        text=rating_text,
+        reply_markup=get_ratings_filter_keyboard(
+            rating_type=rating_type,
+            current_filter=filter_type,
+        ),
+        parse_mode="HTML",
+    )
+
+
+async def _find_user_in_rating(
+    callback: types.CallbackQuery,
+    rating_type: str,
+) -> None:
+    """
+    Находит позицию пользователя/команды в рейтинге и прокручивает к ней.
+    
+    Args:
+        callback: Callback query
+        rating_type: Тип рейтинга (players или teams)
+    """
+    user_id = callback.from_user.id
+    
+    if rating_type == "players":
+        # Находим позицию игрока
+        position = None
+        if _mongo_client is not None:
+            try:
+                position = await _mongo_client.get_user_rating_position(
+                    user_id=user_id,
+                    filter_type="all_time",
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении позиции игрока: {e}")
+        
+        if position is None:
+            await callback.answer("Вы не найдены в рейтинге", show_alert=True)
+            return
+        
+        # Получаем рейтинг и показываем с выделением позиции
+        players = []
+        if _mongo_client is not None:
+            try:
+                players = await _mongo_client.get_players_rating(
+                    filter_type="all_time",
+                    limit=1000,  # Получаем больше, чтобы найти пользователя
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении рейтинга: {e}")
+        
+        rating_text = format_players_rating(
+            players=players,
+            filter_text="За всё время",
+            user_position=position,
+        )
+    else:
+        # Находим позицию команды
+        user_team = None
+        team_id = None
+        position = None
+        
+        if _mongo_client is not None:
+            try:
+                user_team = await _mongo_client.get_user_team(user_id)
+                if user_team:
+                    team_id = user_team.id
+                    position = await _mongo_client.get_team_rating_position(
+                        team_id=team_id,
+                        filter_type="all_time",
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении позиции команды: {e}")
+        
+        if position is None:
+            await callback.answer("Вы не найдены в рейтинге команд", show_alert=True)
+            return
+        
+        # Получаем рейтинг и показываем с выделением позиции
+        teams = []
+        if _mongo_client is not None:
+            try:
+                teams = await _mongo_client.get_teams_rating(
+                    filter_type="all_time",
+                    limit=1000,  # Получаем больше, чтобы найти команду
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении рейтинга: {e}")
+        
+        rating_text = format_teams_rating(
+            teams=teams,
+            filter_text="За всё время",
+            team_position=position,
+        )
+    
+    await callback.message.edit_text(
+        text=rating_text,
+        reply_markup=get_ratings_filter_keyboard(
+            rating_type=rating_type,
+            current_filter="all_time",
+        ),
+        parse_mode="HTML",
+    )
+    await callback.answer(f"Ваша позиция: #{position}")
 
 
 async def tournament_create_message_handler(

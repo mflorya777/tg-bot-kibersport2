@@ -54,6 +54,7 @@ async def register_handlers(
         | F.data.startswith("profile_")
         | F.data.startswith("team_")
         | F.data.startswith("tournaments_")
+        | F.data.startswith("ratings_")
         | (F.data.startswith("tournament_") & ~F.data.startswith("tournament_create_") & ~F.data.startswith("tournament_join_") & ~F.data.startswith("tournament_confirm_")),
     )
     dp.callback_query.register(

@@ -343,3 +343,148 @@ class MongoClient:
                 f"Ошибка при создании турнира {tournament.id} в MongoDB: {e}",
             )
             raise
+
+    async def get_players_rating(
+        self,
+        filter_type: str = "all_time",
+        tournament_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[User]:
+        """
+        Получает рейтинг игроков с фильтрацией.
+        
+        Args:
+            filter_type: Тип фильтра (all_time, season, month, tournament)
+            tournament_id: ID турнира (если filter_type == "tournament")
+            limit: Максимальное количество записей
+        
+        Returns:
+            Список пользователей, отсортированный по рейтингу
+        """
+        try:
+            query = {}
+            
+            # Фильтр по времени (пока упрощенная версия - за всё время)
+            # В будущем можно добавить фильтрацию по датам
+            if filter_type == "tournament" and tournament_id:
+                # Для фильтра по турниру нужно будет получать участников турнира
+                # Пока возвращаем общий рейтинг
+                pass
+            
+            # Сортируем по total_kills (основной показатель) по убыванию
+            cursor = (
+                self.users_collection
+                .find(query)
+                .sort("total_kills", -1)
+                .limit(limit)
+            )
+            
+            players = []
+            async for doc in cursor:
+                players.append(User(**doc))
+            
+            return players
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении рейтинга игроков: {e}",
+            )
+            return []
+
+    async def get_teams_rating(
+        self,
+        filter_type: str = "all_time",
+        tournament_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[Team]:
+        """
+        Получает рейтинг команд с фильтрацией.
+        
+        Args:
+            filter_type: Тип фильтра (all_time, season, month, tournament)
+            tournament_id: ID турнира (если filter_type == "tournament")
+            limit: Максимальное количество записей
+        
+        Returns:
+            Список команд, отсортированный по рейтингу
+        """
+        try:
+            query = {}
+            
+            # Фильтр по времени (пока упрощенная версия - за всё время)
+            if filter_type == "tournament" and tournament_id:
+                # Для фильтра по турниру нужно будет получать участников турнира
+                # Пока возвращаем общий рейтинг
+                pass
+            
+            # Сортируем по total_points (основной показатель) по убыванию
+            cursor = (
+                self.teams_collection
+                .find(query)
+                .sort("total_points", -1)
+                .limit(limit)
+            )
+            
+            teams = []
+            async for doc in cursor:
+                teams.append(Team(**doc))
+            
+            return teams
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении рейтинга команд: {e}",
+            )
+            return []
+
+    async def get_user_rating_position(
+        self,
+        user_id: int,
+        filter_type: str = "all_time",
+    ) -> Optional[int]:
+        """
+        Получает позицию пользователя в рейтинге.
+        
+        Args:
+            user_id: Telegram user_id
+            filter_type: Тип фильтра (all_time, season, month, tournament)
+        
+        Returns:
+            Позиция в рейтинге (1-based) или None, если пользователь не найден
+        """
+        try:
+            players = await self.get_players_rating(filter_type=filter_type, limit=1000)
+            for idx, player in enumerate(players, start=1):
+                if player.id == user_id:
+                    return idx
+            return None
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении позиции пользователя {user_id} в рейтинге: {e}",
+            )
+            return None
+
+    async def get_team_rating_position(
+        self,
+        team_id: str,
+        filter_type: str = "all_time",
+    ) -> Optional[int]:
+        """
+        Получает позицию команды в рейтинге.
+        
+        Args:
+            team_id: ID команды
+            filter_type: Тип фильтра (all_time, season, month, tournament)
+        
+        Returns:
+            Позиция в рейтинге (1-based) или None, если команда не найдена
+        """
+        try:
+            teams = await self.get_teams_rating(filter_type=filter_type, limit=1000)
+            for idx, team in enumerate(teams, start=1):
+                if team.id == team_id:
+                    return idx
+            return None
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении позиции команды {team_id} в рейтинге: {e}",
+            )
+            return None
