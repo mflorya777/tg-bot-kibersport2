@@ -48,6 +48,10 @@ from src.modules.keyboards import (
     get_admin_promocodes_list_keyboard,
     get_admin_promocode_card_keyboard,
     get_admin_transaction_reasons_list_keyboard,
+    get_admin_promotions_keyboard,
+    get_admin_promotions_list_keyboard,
+    get_admin_promotion_card_keyboard,
+    get_giveaway_participation_type_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -66,6 +70,9 @@ from src.models.mongo_models import (
     Promocode,
     BonusSettings,
     TransactionReason,
+    Giveaway,
+    GiveawayStatus,
+    GiveawayParticipationType,
     MOSCOW_TZ,
 )
 from src.clients.mongo import MongoClient
@@ -97,6 +104,9 @@ _waiting_team_search: dict[int, bool] = {}
 
 # Словарь для хранения состояния внесения результатов
 _waiting_results_data: dict[int, dict] = {}
+
+# Словарь для хранения состояния создания розыгрыша
+_waiting_giveaway_data: dict[int, dict] = {}
 
 # Словарь для хранения состояния ожидания суммы токенов для начисления/списания
 _waiting_token_amount: dict[int, dict] = {}
@@ -2968,11 +2978,146 @@ async def admin_callback_handler(
     elif callback_data == "admin_promotions":
         await callback.answer("Акции и розыгрыши")
         await callback.message.edit_text(
-            text="🎉 Акции и розыгрыши\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
-            ),
+            text="🎉 Акции и розыгрыши\n\n"
+                 "Управление розыгрышами и акциями:",
+            reply_markup=get_admin_promotions_keyboard(),
         )
+    elif callback_data == "admin_promotion_create":
+        await callback.answer("Создание розыгрыша")
+        _waiting_giveaway_data[callback.from_user.id] = {
+            "type": "create_giveaway",
+            "step": "name",
+        }
+        await callback.message.edit_text(
+            text="🎉 Создание розыгрыша\n\n"
+                 "Шаг 1/5: Название\n\n"
+                 "Введите название розыгрыша:\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+    elif callback_data == "admin_promotions_list":
+        await callback.answer("Список розыгрышей")
+        # Получаем список розыгрышей
+        promotions = []
+        if _mongo_client is not None:
+            try:
+                promotions = await _mongo_client.get_giveaways()
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении розыгрышей: {e}")
+        
+        await callback.message.edit_text(
+            text="📋 Список розыгрышей\n\n"
+                 "Выберите розыгрыш:",
+            reply_markup=get_admin_promotions_list_keyboard(promotions),
+        )
+    elif callback_data.startswith("admin_promotion_type_"):
+        # Выбор способа участия при создании розыгрыша (должен быть ПЕРЕД admin_promotion_)
+        participation_type_str = callback_data.replace("admin_promotion_type_", "")
+        participation_type = GiveawayParticipationType.TOKENS if participation_type_str == "tokens" else GiveawayParticipationType.CONDITION
+        
+        user_id = callback.from_user.id
+        if user_id in _waiting_giveaway_data:
+            _waiting_giveaway_data[user_id]["participation_type"] = participation_type
+            _waiting_giveaway_data[user_id]["step"] = "participation_details"
+            
+            await callback.answer("Способ выбран")
+            if participation_type == GiveawayParticipationType.TOKENS:
+                await callback.message.edit_text(
+                    text=f"🎉 Создание розыгрыша\n\n"
+                         f"Способ участия: За CD токены\n\n"
+                         f"Шаг 4/5: Стоимость билета\n\n"
+                         f"Введите стоимость билета в CD токенах:\n\n"
+                         f"Или отправьте /cancel для отмены.",
+                )
+            else:
+                await callback.message.edit_text(
+                    text=f"🎉 Создание розыгрыша\n\n"
+                         f"Способ участия: За выполнение условия\n\n"
+                         f"Шаг 4/5: Описание условия\n\n"
+                         f"Введите описание условия (например, 'сыграть турнир'):\n\n"
+                         f"Или отправьте /cancel для отмены.",
+                )
+    elif callback_data.startswith("admin_promotion_"):
+        promotion_id = callback_data.replace("admin_promotion_", "")
+        
+        if promotion_id.startswith("determine_winners_"):
+            # Определение победителей
+            actual_promotion_id = promotion_id.replace("determine_winners_", "")
+            await callback.answer("Определение победителей...")
+            
+            if _mongo_client is not None:
+                try:
+                    promotion = await _mongo_client.get_giveaway(actual_promotion_id)
+                    if not promotion:
+                        await callback.answer("Розыгрыш не найден", show_alert=True)
+                        return
+                    
+                    # Определяем победителей (случайный выбор из участников)
+                    winners = await _mongo_client.determine_giveaway_winners(actual_promotion_id)
+                    
+                    if winners:
+                        # Формируем список победителей
+                        winners_text = "🏆 Победители розыгрыша:\n\n"
+                        for idx, winner_id in enumerate(winners, start=1):
+                            user = await _mongo_client.get_user(winner_id)
+                            winner_name = user.nickname or user.name if user else f"ID:{winner_id}"
+                            winners_text += f"{idx}. {winner_name} (ID: {winner_id})\n"
+                        
+                        await callback.message.edit_text(
+                            text=f"🎉 Розыгрыш: {promotion.name}\n\n{winners_text}",
+                            reply_markup=get_admin_promotion_card_keyboard(
+                                actual_promotion_id,
+                                GiveawayStatus.COMPLETED,
+                            ),
+                        )
+                        await callback.answer("✅ Победители определены!", show_alert=True)
+                    else:
+                        await callback.answer("Нет участников для определения победителей", show_alert=True)
+                except Exception as e:
+                    _LOG.error(f"Ошибка при определении победителей: {e}")
+                    await callback.answer("❌ Произошла ошибка", show_alert=True)
+        else:
+            # Просмотр карточки розыгрыша
+            await callback.answer("Розыгрыш")
+            
+            if _mongo_client is not None:
+                try:
+                    promotion = await _mongo_client.get_giveaway(promotion_id)
+                    if not promotion:
+                        await callback.answer("Розыгрыш не найден", show_alert=True)
+                        return
+                    
+                    # Формируем текст карточки
+                    status_text = {
+                        GiveawayStatus.DRAFT: "Черновик",
+                        GiveawayStatus.ACTIVE: "Активен",
+                        GiveawayStatus.COMPLETED: "Завершен",
+                    }
+                    participation_text = {
+                        GiveawayParticipationType.TOKENS: f"💰 За CD токены ({promotion.ticket_cost} токенов за билет)",
+                        GiveawayParticipationType.CONDITION: f"✅ За выполнение условия: {promotion.condition_description}",
+                    }
+                    
+                    text = f"🎉 Розыгрыш: {promotion.name}\n\n"
+                    text += f"Статус: {status_text.get(promotion.status, promotion.status.value)}\n"
+                    text += f"Описание: {promotion.description}\n"
+                    text += f"Период: {promotion.start_date.strftime('%d.%m.%Y %H:%M')} - {promotion.end_date.strftime('%d.%m.%Y %H:%M')}\n"
+                    text += f"Способ участия: {participation_text.get(promotion.participation_type, promotion.participation_type.value)}\n"
+                    if promotion.ticket_limit_per_user:
+                        text += f"Лимит билетов: {promotion.ticket_limit_per_user} на человека\n"
+                    text += f"Участников: {len(promotion.participants)}\n"
+                    if promotion.winners:
+                        text += f"Победителей: {len(promotion.winners)}\n"
+                    
+                    await callback.message.edit_text(
+                        text=text,
+                        reply_markup=get_admin_promotion_card_keyboard(
+                            promotion_id,
+                            promotion.status,
+                        ),
+                    )
+                except Exception as e:
+                    _LOG.error(f"Ошибка при получении розыгрыша: {e}")
+                    await callback.answer("Произошла ошибка", show_alert=True)
     elif callback_data == "admin_referral":
         await callback.answer("Рефералка")
         await callback.message.edit_text(
@@ -4660,3 +4805,197 @@ async def admin_transaction_reason_message_handler(
                 except Exception as e:
                     _LOG.error(f"Ошибка при создании шаблона: {e}")
                     await message.answer("❌ Произошла ошибка при создании шаблона.")
+
+
+async def admin_giveaway_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для создания розыгрышей.
+    """
+    user_id = message.from_user.id
+    
+    if user_id not in _waiting_giveaway_data:
+        return
+    
+    data = _waiting_giveaway_data[user_id]
+    result_type = data.get("type")
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_giveaway_data.pop(user_id, None)
+        await message.answer("❌ Создание розыгрыша отменено.")
+        return
+    
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    if result_type == "create_giveaway":
+        step = data.get("step", "name")
+        
+        if step == "name":
+            name = message.text.strip()
+            if not name:
+                await message.answer(
+                    "❌ Название не может быть пустым.\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            data["name"] = name
+            data["step"] = "description"
+            await message.answer(
+                f"✅ Название: {name}\n\n"
+                "Шаг 2/5: Описание/призы\n\n"
+                "Введите описание розыгрыша и призы:\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+        elif step == "description":
+            description = message.text.strip()
+            if not description:
+                await message.answer(
+                    "❌ Описание не может быть пустым.\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            data["description"] = description
+            data["step"] = "period"
+            await message.answer(
+                f"✅ Описание: {description}\n\n"
+                "Шаг 3/5: Период\n\n"
+                "Введите даты в формате:\n"
+                "<b>ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ</b>\n"
+                "(начало | конец):\n\n"
+                "Или отправьте /cancel для отмены.",
+                parse_mode="HTML",
+            )
+        elif step == "period":
+            dates_text = message.text.strip()
+            try:
+                parts = dates_text.split("|")
+                if len(parts) != 2:
+                    raise ValueError
+                
+                start_str = parts[0].strip()
+                end_str = parts[1].strip()
+                
+                start_date = dt.datetime.strptime(start_str, "%d.%m.%Y %H:%M")
+                end_date = dt.datetime.strptime(end_str, "%d.%m.%Y %H:%M")
+                
+                # Устанавливаем московский часовой пояс
+                start_date = start_date.replace(tzinfo=MOSCOW_TZ)
+                end_date = end_date.replace(tzinfo=MOSCOW_TZ)
+                
+                if end_date <= start_date:
+                    await message.answer(
+                        "❌ Дата окончания должна быть позже даты начала.\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+                    return
+                
+                data["start_date"] = start_date
+                data["end_date"] = end_date
+                data["step"] = "participation_type"
+                await message.answer(
+                    f"✅ Период: {start_date.strftime('%d.%m.%Y %H:%M')} - {end_date.strftime('%d.%m.%Y %H:%M')}\n\n"
+                    "Шаг 4/5: Способ участия\n\n"
+                    "Выберите способ участия:",
+                    reply_markup=get_giveaway_participation_type_keyboard(),
+                )
+            except ValueError:
+                await message.answer(
+                    "❌ Неверный формат дат.\n\n"
+                    "Введите даты в формате: <b>ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ</b>\n"
+                    "Или отправьте /cancel для отмены.",
+                    parse_mode="HTML",
+                )
+        elif step == "participation_details":
+            participation_type = data.get("participation_type")
+            
+            if participation_type == GiveawayParticipationType.TOKENS:
+                # Ввод стоимости билета
+                try:
+                    ticket_cost = int(message.text.strip())
+                    if ticket_cost <= 0:
+                        await message.answer(
+                            "❌ Стоимость должна быть больше 0.\n\n"
+                            "Или отправьте /cancel для отмены.",
+                        )
+                        return
+                    
+                    data["ticket_cost"] = ticket_cost
+                    data["step"] = "limit"
+                    await message.answer(
+                        f"✅ Стоимость билета: {ticket_cost} CD токенов\n\n"
+                        "Шаг 5/5: Лимит билетов\n\n"
+                        "Введите лимит билетов на человека (число) или 'нет' для безлимита:\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+                except ValueError:
+                    await message.answer(
+                        "❌ Неверный формат. Введите число.\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+            else:
+                # Ввод описания условия
+                condition_description = message.text.strip()
+                if not condition_description:
+                    await message.answer(
+                        "❌ Описание условия не может быть пустым.\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+                    return
+                
+                data["condition_description"] = condition_description
+                data["step"] = "limit"
+                await message.answer(
+                    f"✅ Условие: {condition_description}\n\n"
+                    "Шаг 5/5: Лимит билетов\n\n"
+                    "Введите лимит билетов на человека (число) или 'нет' для безлимита:\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+        elif step == "limit":
+            limit_text = message.text.strip().lower()
+            ticket_limit = None
+            if limit_text != "нет":
+                try:
+                    ticket_limit = int(limit_text)
+                    if ticket_limit <= 0:
+                        await message.answer(
+                            "❌ Лимит должен быть больше 0.\n\n"
+                            "Или отправьте /cancel для отмены.",
+                        )
+                        return
+                except ValueError:
+                    await message.answer(
+                        "❌ Неверный формат. Введите число или 'нет'.\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+                    return
+            
+            # Создаем розыгрыш
+            if _mongo_client is not None:
+                try:
+                    promotion = await _mongo_client.create_giveaway(
+                        name=data["name"],
+                        description=data["description"],
+                        start_date=data["start_date"],
+                        end_date=data["end_date"],
+                        participation_type=data["participation_type"],
+                        ticket_cost=data.get("ticket_cost"),
+                        condition_description=data.get("condition_description"),
+                        ticket_limit_per_user=ticket_limit,
+                    )
+                    _waiting_giveaway_data.pop(user_id, None)
+                    await message.answer(
+                        f"✅ Розыгрыш '{promotion.name}' успешно создан!\n\n"
+                        f"Статус: {promotion.status.value}",
+                    )
+                except Exception as e:
+                    _LOG.error(f"Ошибка при создании розыгрыша: {e}")
+                    await message.answer("❌ Произошла ошибка при создании розыгрыша.")

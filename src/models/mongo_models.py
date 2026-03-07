@@ -572,3 +572,82 @@ class TransactionReason(BaseModel):
         default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
         description="Дата создания шаблона",
     )
+
+
+class GiveawayParticipationType(str, Enum):
+    """
+    Тип участия в розыгрыше.
+    """
+    TOKENS = "tokens"  # За CD токены
+    CONDITION = "condition"  # За выполнение условия
+
+
+class GiveawayStatus(str, Enum):
+    """
+    Статус розыгрыша.
+    """
+    DRAFT = "draft"  # Черновик
+    ACTIVE = "active"  # Активен
+    COMPLETED = "completed"  # Завершен
+
+
+class Giveaway(BaseModel):
+    """
+    Розыгрыш/акция.
+    """
+    id: str = Field(
+        ...,
+        description="Уникальный ID розыгрыша",
+    )
+    name: str = Field(
+        ...,
+        description="Название розыгрыша",
+    )
+    description: str = Field(
+        ...,
+        description="Описание/призы",
+    )
+    start_date: dt.datetime = Field(
+        ...,
+        description="Дата начала розыгрыша",
+    )
+    end_date: dt.datetime = Field(
+        ...,
+        description="Дата окончания розыгрыша",
+    )
+    participation_type: GiveawayParticipationType = Field(
+        ...,
+        description="Способ участия",
+    )
+    ticket_cost: Optional[int] = Field(
+        None,
+        description="Стоимость билета в CD токенах (если participation_type == TOKENS)",
+    )
+    condition_description: Optional[str] = Field(
+        None,
+        description="Описание условия (если participation_type == CONDITION)",
+    )
+    ticket_limit_per_user: Optional[int] = Field(
+        None,
+        description="Лимит билетов на пользователя (None = безлимит)",
+    )
+    status: GiveawayStatus = Field(
+        default=GiveawayStatus.DRAFT,
+        description="Статус розыгрыша",
+    )
+    participants: dict[int, int] = Field(
+        default_factory=dict,
+        description="Участники: {user_id: количество_билетов}",
+    )
+    winners: list[int] = Field(
+        default_factory=list,
+        description="Список ID победителей",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата создания розыгрыша",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )

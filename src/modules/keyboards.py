@@ -8,6 +8,8 @@ from src.models.mongo_models import (
     Promocode,
     TransactionReason,
     TransactionType,
+    Giveaway,
+    GiveawayStatus,
 )
 from src.config import MINI_APP_URL
 
@@ -1658,5 +1660,124 @@ def get_admin_transaction_reasons_list_keyboard(
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_promotions_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для админ-панели акций и розыгрышей.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Создать розыгрыш",
+                    callback_data="admin_promotion_create",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Список розыгрышей",
+                    callback_data="admin_promotions_list",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_promotions_list_keyboard(
+    promotions: list[Giveaway],
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для списка розыгрышей.
+    
+    Args:
+        promotions: Список розыгрышей
+    """
+    keyboard_rows = []
+    
+    for promotion in promotions:
+        status_icon = "✅" if promotion.status == GiveawayStatus.ACTIVE else "⏳" if promotion.status == GiveawayStatus.DRAFT else "🏁"
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"{status_icon} {promotion.name}",
+                callback_data=f"admin_promotion_{promotion.id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_promotions",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_promotion_card_keyboard(
+    promotion_id: str,
+    status: GiveawayStatus,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для карточки розыгрыша.
+    
+    Args:
+        promotion_id: ID розыгрыша
+        status: Статус розыгрыша
+    """
+    keyboard_rows = []
+    
+    if status == GiveawayStatus.ACTIVE:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="🏁 Определить победителей",
+                callback_data=f"admin_promotion_determine_winners_{promotion_id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_promotions_list",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_giveaway_participation_type_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора способа участия в розыгрыше.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💰 За CD токены",
+                    callback_data="admin_promotion_type_tokens",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✅ За выполнение условия",
+                    callback_data="admin_promotion_type_condition",
+                ),
+            ],
+        ],
     )
     return keyboard

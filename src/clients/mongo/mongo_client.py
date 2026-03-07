@@ -21,6 +21,9 @@ from src.models.mongo_models import (
     Promocode,
     BonusSettings,
     TransactionReason,
+    Giveaway,
+    GiveawayStatus,
+    GiveawayParticipationType,
 )
 from src.models.user_roles import UserRole
 
@@ -1829,4 +1832,148 @@ class MongoClient:
             return reason
         except Exception as e:
             _LOG.error(f"Ошибка при создании шаблона причины транзакции: {e}")
+            raise
+
+    async def create_giveaway(
+        self,
+        name: str,
+        description: str,
+        start_date: dt.datetime,
+        end_date: dt.datetime,
+        participation_type: GiveawayParticipationType,
+        ticket_cost: Optional[int] = None,
+        condition_description: Optional[str] = None,
+        ticket_limit_per_user: Optional[int] = None,
+    ) -> Giveaway:
+        """
+        Создает новый розыгрыш.
+        
+        Args:
+            name: Название розыгрыша
+            description: Описание/призы
+            start_date: Дата начала
+            end_date: Дата окончания
+            participation_type: Способ участия
+            ticket_cost: Стоимость билета (если participation_type == TOKENS)
+            condition_description: Описание условия (если participation_type == CONDITION)
+            ticket_limit_per_user: Лимит билетов на пользователя
+        
+        Returns:
+            Созданный розыгрыш
+        """
+        try:
+            import secrets
+            giveaway_id = f"giveaway_{secrets.token_urlsafe(12)}"
+            giveaway = Giveaway(
+                id=giveaway_id,
+                name=name,
+                description=description,
+                start_date=start_date,
+                end_date=end_date,
+                participation_type=participation_type,
+                ticket_cost=ticket_cost,
+                condition_description=condition_description,
+                ticket_limit_per_user=ticket_limit_per_user,
+                status=GiveawayStatus.DRAFT,
+            )
+            giveaways_collection = self.db["giveaways"]
+            await giveaways_collection.insert_one(giveaway.model_dump())
+            _LOG.info(f"Создан розыгрыш {name}")
+            return giveaway
+        except Exception as e:
+            _LOG.error(f"Ошибка при создании розыгрыша: {e}")
+            raise
+    
+    async def get_giveaways(
+        self,
+    ) -> list[Giveaway]:
+        """
+        Получает список всех розыгрышей.
+        
+        Returns:
+            Список розыгрышей
+        """
+        try:
+            giveaways_collection = self.db["giveaways"]
+            cursor = giveaways_collection.find({})
+            giveaways = []
+            async for doc in cursor:
+                giveaways.append(Giveaway(**doc))
+            return giveaways
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении розыгрышей: {e}")
+            return []
+    
+    async def get_giveaway(
+        self,
+        giveaway_id: str,
+    ) -> Optional[Giveaway]:
+        """
+        Получает розыгрыш по ID.
+        
+        Args:
+            giveaway_id: ID розыгрыша
+        
+        Returns:
+            Объект розыгрыша или None
+        """
+        try:
+            giveaways_collection = self.db["giveaways"]
+            doc = await giveaways_collection.find_one({"id": giveaway_id})
+            if not doc:
+                return None
+            return Giveaway(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении розыгрыша {giveaway_id}: {e}")
+            return None
+    
+    async def determine_giveaway_winners(
+        self,
+        giveaway_id: str,
+        winner_count: int = 1,
+    ) -> list[int]:
+        """
+        Определяет победителей розыгрыша.
+        
+        Args:
+            giveaway_id: ID розыгрыша
+            winner_count: Количество победителей
+        
+        Returns:
+            Список ID победителей
+        """
+        try:
+            giveaway = await self.get_giveaway(giveaway_id)
+            if not giveaway:
+                return []
+            
+            # Получаем всех участников (с учетом количества билетов)
+            participants_list = []
+            for user_id, ticket_count in giveaway.participants.items():
+                # Добавляем пользователя столько раз, сколько у него билетов
+                participants_list.extend([user_id] * ticket_count)
+            
+            if not participants_list:
+                return []
+            
+            # Случайный выбор победителей
+            import random
+            winners = random.sample(participants_list, min(winner_count, len(participants_list)))
+            unique_winners = list(set(winners))  # Убираем дубликаты
+            
+            # Обновляем розыгрыш
+            giveaways_collection = self.db["giveaways"]
+            await giveaways_collection.update_one(
+                {"id": giveaway_id},
+                {"$set": {
+                    "winners": unique_winners,
+                    "status": GiveawayStatus.COMPLETED,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            
+            _LOG.info(f"Определены победители розыгрыша {giveaway_id}: {len(unique_winners)} победителей")
+            return unique_winners
+        except Exception as e:
+            _LOG.error(f"Ошибка при определении победителей розыгрыша: {e}")
             raise
