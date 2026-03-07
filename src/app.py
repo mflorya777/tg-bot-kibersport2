@@ -42,23 +42,86 @@ async def register_handlers(
         start_handler,
         Command("start"),
     )
-    # Регистрируем обработчики в порядке приоритета:
-    # 1. Обработчик промокодов (проверяется первым)
-    # 2. Обработчик вопросов в поддержку
-    # 3. Обработчик создания турнира
-    # 4. Обработчик создания команды
-    dp.message.register(
-        promocode_message_handler,
+    # Регистрируем обработчики сообщений
+    # В aiogram 3.x обработчики вызываются последовательно
+    # Каждый обработчик проверяет свое состояние и если не подходит - просто возвращается
+    # Порядок важен - более специфичные обработчики должны быть первыми
+    
+    # Сначала обработчики, которые проверяют состояние через словари
+    # (они должны быть первыми, чтобы не блокировать друг друга)
+    # Важно: порядок регистрации определяет порядок вызова
+    # В aiogram 3.x обработчики вызываются в порядке регистрации
+    # Если один обработчик делает return, следующий должен вызываться
+    print("[DEBUG] Регистрация обработчиков сообщений...")
+    
+    # Импортируем словари для проверки состояния
+    from src.modules.handlers import (
+        _waiting_team_data,
+        _waiting_promocode,
+        _waiting_support_question,
+        _tournament_creation_data,
     )
-    dp.message.register(
-        support_question_message_handler,
-    )
-    dp.message.register(
-        tournament_create_message_handler,
-    )
-    dp.message.register(
-        team_create_message_handler,
-    )
+    
+    # Создаем один общий обработчик, который проверяет все состояния
+    async def unified_message_handler(message: types.Message):
+        """Общий обработчик, который проверяет все состояния и вызывает соответствующие функции"""
+        user_id = message.from_user.id
+        
+        print(f"[DEBUG] >>> unified_message_handler ВЫЗВАН для пользователя {user_id}")
+        print(f"[DEBUG] Состояния: team={_waiting_team_data.get(user_id, False)}, "
+              f"promocode={_waiting_promocode.get(user_id, False)}, "
+              f"support={_waiting_support_question.get(user_id, False)}, "
+              f"tournament={user_id in _tournament_creation_data}")
+        
+        # Проверяем состояние промокода
+        if _waiting_promocode.get(user_id, False):
+            print(f"[DEBUG] >>> Вызываем promocode_message_handler для пользователя {user_id}")
+            await promocode_message_handler(message)
+            return
+        
+        # Проверяем состояние команды
+        if _waiting_team_data.get(user_id, False):
+            print(f"[DEBUG] >>> Вызываем team_create_message_handler для пользователя {user_id}")
+            await team_create_message_handler(message)
+            return
+        
+        # Проверяем состояние поддержки
+        if _waiting_support_question.get(user_id, False):
+            print(f"[DEBUG] >>> Вызываем support_question_message_handler для пользователя {user_id}")
+            await support_question_message_handler(message)
+            return
+        
+        # Проверяем состояние создания турнира
+        if user_id in _tournament_creation_data:
+            print(f"[DEBUG] >>> Вызываем tournament_create_message_handler для пользователя {user_id}")
+            await tournament_create_message_handler(message)
+            return
+        
+        # Если ни одно состояние не активно, ничего не делаем
+        print(f"[DEBUG] >>> unified_message_handler: нет активных состояний для пользователя {user_id}")
+    
+    # Регистрируем единый обработчик
+    dp.message.register(unified_message_handler)
+    print("[DEBUG] unified_message_handler зарегистрирован")
+    
+    # Добавляем общий обработчик для отладки (в конце, чтобы не мешать другим)
+    async def debug_message_handler(message: types.Message):
+        """Общий обработчик для отладки - логирует все сообщения"""
+        print(f"[DEBUG] >>> debug_message_handler ВЫЗВАН (последний)")
+        if message.text and not message.text.startswith("/"):
+            user_id = message.from_user.id
+            print(
+                f"[DEBUG] Получено сообщение от {user_id}: "
+                f"'{message.text[:50]}' | "
+                f"waiting_team={_waiting_team_data.get(user_id, False)}, "
+                f"waiting_promocode={_waiting_promocode.get(user_id, False)}, "
+                f"waiting_support={_waiting_support_question.get(user_id, False)}, "
+                f"creating_tournament={user_id in _tournament_creation_data}"
+            )
+        # Этот обработчик всегда должен вызываться последним
+        # Он не блокирует другие обработчики, так как просто логирует
+    
+    dp.message.register(debug_message_handler)
     dp.callback_query.register(
         callback_handler,
         F.data.startswith("menu_")

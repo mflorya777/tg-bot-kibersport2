@@ -838,7 +838,7 @@ async def callback_handler(
         # Активируем режим ожидания промокода
         user_id = callback.from_user.id
         _waiting_promocode[user_id] = True
-        _LOG.debug(f"Активирован режим ожидания промокода для пользователя {user_id}")
+        print(f"[INFO] Активирован режим ожидания промокода для пользователя {user_id}")
         await callback.message.edit_text(
             text="🧾 Ввести промокод\n\n"
                  "Введите промокод для получения бонусов.\n\n"
@@ -983,7 +983,18 @@ async def callback_handler(
         )
         
         # Устанавливаем флаг ожидания данных команды
-        _waiting_team_data[callback.from_user.id] = True
+        user_id = callback.from_user.id
+        _waiting_team_data[user_id] = True
+        print(f"[INFO] Активирован режим ожидания данных команды для пользователя {user_id}")
+        # Также отправляем новое сообщение для ясности
+        await callback.message.answer(
+            "💬 Ожидаю данные команды...\n\n"
+            "Отправьте название и тег команды в формате:\n"
+            "<b>Название команды | Тег</b>\n\n"
+            "Пример: <code>Моя команда | MT</code>\n\n"
+            "Или отправьте /cancel для отмены.",
+            parse_mode="HTML",
+        )
     elif callback_data == "team_search":
         await callback.answer("Поиск команды")
         await callback.message.edit_text(
@@ -1942,11 +1953,17 @@ async def team_create_message_handler(
     Обработчик текстовых сообщений для создания команды.
     Ожидает формат: "Название команды | Тег"
     """
+    print(f"[DEBUG] >>> team_create_message_handler ВЫЗВАН")
     user_id = message.from_user.id
+    print(f"[DEBUG] team_create_message_handler вызван для пользователя {user_id}, waiting={_waiting_team_data.get(user_id, False)}")
     
     # Проверяем, ожидает ли пользователь ввода данных команды
     if not _waiting_team_data.get(user_id, False):
+        # Не обрабатываем, но не блокируем другие обработчики
+        print(f"[DEBUG] Пользователь {user_id} не в режиме ожидания данных команды")
         return
+    
+    print(f"[INFO] Обработка данных команды от пользователя {user_id}, текст: {message.text[:50] if message.text else 'не текст'}")
     
     # Проверяем команду /cancel
     if message.text and message.text.strip().lower() == "/cancel":
@@ -2364,14 +2381,17 @@ async def support_question_message_handler(
     """
     Обработчик сообщений для отправки вопроса в поддержку.
     """
+    print(f"[DEBUG] >>> support_question_message_handler ВЫЗВАН")
     user_id = message.from_user.id
+    print(f"[DEBUG] support_question_message_handler вызван для пользователя {user_id}, waiting={_waiting_support_question.get(user_id, False)}")
     
     # Проверяем, ожидает ли пользователь ввода вопроса
     if not _waiting_support_question.get(user_id, False):
-        _LOG.debug(f"Сообщение от пользователя {user_id} не обрабатывается (не в режиме ожидания вопроса)")
+        # Не обрабатываем, но не блокируем другие обработчики
+        print(f"[DEBUG] Пользователь {user_id} не в режиме ожидания вопроса")
         return
     
-    _LOG.debug(f"Обработка вопроса от пользователя {user_id}")
+    print(f"[INFO] Обработка вопроса от пользователя {user_id}, текст: {message.text[:50] if message.text else 'не текст'}")
     
     # Проверяем команду /cancel
     if message.text and message.text.strip().lower() == "/cancel":
@@ -2460,14 +2480,19 @@ async def promocode_message_handler(
     """
     Обработчик сообщений для ввода промокода.
     """
+    print(f"[DEBUG] >>> promocode_message_handler ВЫЗВАН")
     user_id = message.from_user.id
+    print(f"[DEBUG] promocode_message_handler вызван для пользователя {user_id}, waiting={_waiting_promocode.get(user_id, False)}")
     
     # Проверяем, ожидает ли пользователь ввода промокода
     if not _waiting_promocode.get(user_id, False):
-        _LOG.debug(f"Сообщение от пользователя {user_id} не обрабатывается промокодом (не в режиме ожидания)")
+        # Не обрабатываем, но не блокируем другие обработчики
+        print(f"[DEBUG] Пользователь {user_id} не в режиме ожидания промокода - пропускаем")
+        # В aiogram 3.x нужно явно продолжить обработку
+        # Но просто return должен работать, возможно проблема в другом месте
         return
     
-    _LOG.debug(f"Обработка промокода от пользователя {user_id}")
+    print(f"[INFO] Обработка промокода от пользователя {user_id}, текст: {message.text[:50] if message.text else 'не текст'}")
     
     # Проверяем команду /cancel
     if message.text and message.text.strip().lower() == "/cancel":
@@ -2545,11 +2570,17 @@ async def tournament_create_message_handler(
     """
     Обработчик текстовых сообщений для пошагового создания турнира.
     """
+    print(f"[DEBUG] >>> tournament_create_message_handler ВЫЗВАН")
     user_id = message.from_user.id
+    print(f"[DEBUG] tournament_create_message_handler вызван для пользователя {user_id}, in_data={user_id in _tournament_creation_data}")
     
     # Проверяем, создаётся ли турнир
     if user_id not in _tournament_creation_data:
+        # Не обрабатываем, но не блокируем другие обработчики
+        print(f"[DEBUG] Пользователь {user_id} не создает турнир")
         return
+    
+    print(f"[INFO] Обработка создания турнира от пользователя {user_id}, шаг: {_tournament_creation_data[user_id].get('step', 'unknown')}")
     
     # Проверяем, что это текстовое сообщение
     if not message.text:
