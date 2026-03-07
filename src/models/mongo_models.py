@@ -263,6 +263,11 @@ class Tournament(BaseModel):
         description="Список team_id команд-участников (для командного)",
     )
     #
+    results_published: bool = Field(
+        default=False,
+        description="Опубликованы ли результаты турнира",
+    )
+    #
     created_at: dt.datetime = Field(
         default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
         description="Дата создания турнира",
@@ -305,4 +310,163 @@ class Transaction(BaseModel):
     created_at: dt.datetime = Field(
         default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
         description="Дата и время транзакции",
+    )
+
+
+class RatingMetric(str, Enum):
+    """
+    Метрики для рейтинга.
+    """
+    KILLS = "kills"  # Киллы (для игроков)
+    POINTS = "points"  # Очки (для команд)
+
+
+class RatingRules(BaseModel):
+    """
+    Правила расчета рейтинга.
+    """
+    id: str = Field(
+        default="rating_rules",
+        description="ID правил (всегда один экземпляр)",
+    )
+    player_metric: RatingMetric = Field(
+        default=RatingMetric.KILLS,
+        description="Основной показатель для рейтинга игроков",
+    )
+    team_metric: RatingMetric = Field(
+        default=RatingMetric.POINTS,
+        description="Основной показатель для рейтинга команд",
+    )
+    season_start_date: Optional[dt.date] = Field(
+        None,
+        description="Дата начала текущего сезона",
+    )
+    season_end_date: Optional[dt.date] = Field(
+        None,
+        description="Дата окончания текущего сезона",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )
+
+class Match(BaseModel):
+    """
+    Матч/раунд в турнире.
+    """
+    id: str = Field(
+        ...,
+        description="Уникальный ID матча",
+    )
+    tournament_id: str = Field(
+        ...,
+        description="ID турнира",
+    )
+    name: str = Field(
+        ...,
+        description="Название матча/раунда",
+    )
+    round_number: Optional[int] = Field(
+        None,
+        description="Номер раунда (если есть)",
+    )
+    match_date: Optional[dt.datetime] = Field(
+        None,
+        description="Дата проведения матча",
+    )
+    is_completed: bool = Field(
+        default=False,
+        description="Завершен ли матч",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата создания матча",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )
+
+
+class MatchResult(BaseModel):
+    """
+    Результат матча для игрока или команды.
+    """
+    id: str = Field(
+        ...,
+        description="Уникальный ID результата",
+    )
+    match_id: str = Field(
+        ...,
+        description="ID матча",
+    )
+    tournament_id: str = Field(
+        ...,
+        description="ID турнира",
+    )
+    player_id: Optional[int] = Field(
+        None,
+        description="Telegram user_id игрока (для соло турниров)",
+    )
+    team_id: Optional[str] = Field(
+        None,
+        description="ID команды (для командных турниров)",
+    )
+    kills: int = Field(
+        default=0,
+        description="Киллы игрока/команды в матче",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата создания результата",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )
+
+
+class TournamentResult(BaseModel):
+    """
+    Итоговый результат турнира для игрока или команды.
+    """
+    id: str = Field(
+        ...,
+        description="Уникальный ID результата",
+    )
+    tournament_id: str = Field(
+        ...,
+        description="ID турнира",
+    )
+    player_id: Optional[int] = Field(
+        None,
+        description="Telegram user_id игрока (для соло турниров)",
+    )
+    team_id: Optional[str] = Field(
+        None,
+        description="ID команды (для командных турниров)",
+    )
+    total_kills: int = Field(
+        default=0,
+        description="Общее количество киллов за турнир",
+    )
+    total_points: int = Field(
+        default=0,
+        description="Общее количество очков за турнир",
+    )
+    position: Optional[int] = Field(
+        None,
+        description="Место в турнире",
+    )
+    is_published: bool = Field(
+        default=False,
+        description="Опубликованы ли результаты",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата создания результата",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
     )

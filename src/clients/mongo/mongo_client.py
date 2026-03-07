@@ -13,6 +13,11 @@ from src.models.mongo_models import (
     TournamentFormat,
     Transaction,
     TransactionType,
+    RatingRules,
+    RatingMetric,
+    Match,
+    MatchResult,
+    TournamentResult,
 )
 from src.models.user_roles import UserRole
 
@@ -1002,4 +1007,505 @@ class MongoClient:
             _LOG.info(f"Обновлен статус подтверждения капитана для команды {team_id}: {captain_confirmed}")
         except Exception as e:
             _LOG.error(f"Ошибка при обновлении статуса подтверждения капитана для команды {team_id}: {e}")
+            raise
+
+    async def get_rating_rules(
+        self,
+    ) -> Optional[RatingRules]:
+        """
+        Получает правила расчета рейтинга.
+        
+        Returns:
+            Объект правил рейтинга или None
+        """
+        try:
+            # Используем отдельную коллекцию для правил рейтинга
+            # Или можно хранить в отдельной коллекции settings
+            doc = await self.users_collection.find_one({"id": "rating_rules"})
+            if not doc:
+                # Создаем правила по умолчанию
+                default_rules = RatingRules()
+                await self.users_collection.insert_one(default_rules.model_dump())
+                return default_rules
+            return RatingRules(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении правил рейтинга: {e}")
+            # Возвращаем правила по умолчанию
+            return RatingRules()
+    
+    async def update_rating_metric(
+        self,
+        rating_type: str,
+        metric: RatingMetric,
+    ) -> None:
+        """
+        Обновляет метрику для рейтинга.
+        
+        Args:
+            rating_type: Тип рейтинга (player или team)
+            metric: Новая метрика
+        """
+        try:
+            update_data = {
+                "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+            }
+            
+            if rating_type == "player":
+                update_data["player_metric"] = metric.value
+            elif rating_type == "team":
+                update_data["team_metric"] = metric.value
+            
+            settings_collection = self.db["settings"]
+            await settings_collection.update_one(
+                {"id": "rating_rules"},
+                {"$set": update_data},
+                upsert=True,
+            )
+            _LOG.info(f"Обновлена метрика рейтинга {rating_type}: {metric.value}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении метрики рейтинга: {e}")
+            raise
+    
+    async def recalculate_ratings(
+        self,
+    ) -> None:
+        """
+        Пересчитывает рейтинг всех игроков и команд на основе результатов турниров.
+        """
+        try:
+            # Получаем правила рейтинга
+            rules = await self.get_rating_rules()
+            
+            # Получаем все опубликованные результаты турниров
+            tournament_results_collection = self.db["tournament_results"]
+            cursor = tournament_results_collection.find({"is_published": True})
+            
+            # Собираем статистику по игрокам и командам
+            player_stats: dict[int, dict[str, int]] = {}  # {user_id: {"kills": int, "points": int}}
+            team_stats: dict[str, dict[str, int]] = {}  # {team_id: {"kills": int, "points": int}}
+            
+            async for doc in cursor:
+                result = TournamentResult(**doc)
+                if result.player_id:
+                    if result.player_id not in player_stats:
+                        player_stats[result.player_id] = {"kills": 0, "points": 0}
+                    player_stats[result.player_id]["kills"] += result.total_kills
+                    player_stats[result.player_id]["points"] += result.total_points
+                elif result.team_id:
+                    if result.team_id not in team_stats:
+                        team_stats[result.team_id] = {"kills": 0, "points": 0}
+                    team_stats[result.team_id]["kills"] += result.total_kills
+                    team_stats[result.team_id]["points"] += result.total_points
+            
+            # Пересчитываем рейтинг игроков
+            players = []
+            cursor = self.users_collection.find({})
+            async for doc in cursor:
+                if "id" in doc and isinstance(doc["id"], int):
+                    try:
+                        user = User(**doc)
+                        # Обновляем статистику из результатов турниров
+                        if user.id in player_stats:
+                            user.total_kills = player_stats[user.id]["kills"]
+                            # Обновляем в БД
+                            await self.users_collection.update_one(
+                                {"id": user.id},
+                                {"$set": {"total_kills": user.total_kills}},
+                            )
+                        players.append(user)
+                    except Exception:
+                        continue
+            
+            # Сортируем игроков по метрике
+            if rules.player_metric == RatingMetric.KILLS:
+                players.sort(key=lambda p: p.total_kills or 0, reverse=True)
+            else:
+                # Если метрика - очки, используем points из статистики
+                players.sort(
+                    key=lambda p: player_stats.get(p.id, {}).get("points", 0),
+                    reverse=True,
+                )
+            
+            # Обновляем позиции в рейтинге
+            for idx, player in enumerate(players, start=1):
+                await self.users_collection.update_one(
+                    {"id": player.id},
+                    {"$set": {"rating_position": idx}},
+                )
+            
+            # Пересчитываем рейтинг команд
+            teams = []
+            cursor = self.teams_collection.find({})
+            async for doc in cursor:
+                try:
+                    team = Team(**doc)
+                    # Обновляем статистику из результатов турниров
+                    if team.id in team_stats:
+                        # Обновляем в БД (если есть поле total_kills для команд)
+                        await self.teams_collection.update_one(
+                            {"id": team.id},
+                            {"$set": {"total_points": team_stats[team.id]["points"]}},
+                        )
+                        team.total_points = team_stats[team.id]["points"]
+                    teams.append(team)
+                except Exception:
+                    continue
+            
+            # Сортируем команды по метрике
+            if rules.team_metric == RatingMetric.POINTS:
+                teams.sort(key=lambda t: t.total_points or 0, reverse=True)
+            else:
+                # Если метрика - киллы, используем kills из статистики
+                teams.sort(
+                    key=lambda t: team_stats.get(t.id, {}).get("kills", 0),
+                    reverse=True,
+                )
+            
+            # Обновляем позиции в рейтинге
+            for idx, team in enumerate(teams, start=1):
+                await self.teams_collection.update_one(
+                    {"id": team.id},
+                    {"$set": {"rating_position": idx}},
+                )
+            
+            _LOG.info("Рейтинг успешно пересчитан на основе результатов турниров")
+        except Exception as e:
+            _LOG.error(f"Ошибка при пересчёте рейтинга: {e}")
+            raise
+
+    async def get_tournament_matches(
+        self,
+        tournament_id: str,
+    ) -> list[Match]:
+        """
+        Получает список матчей турнира.
+        
+        Args:
+            tournament_id: ID турнира
+        
+        Returns:
+            Список матчей
+        """
+        try:
+            matches_collection = self.db["matches"]
+            cursor = matches_collection.find({"tournament_id": tournament_id})
+            matches = []
+            async for doc in cursor:
+                matches.append(Match(**doc))
+            return matches
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении матчей турнира {tournament_id}: {e}")
+            return []
+    
+    async def get_match(
+        self,
+        match_id: str,
+    ) -> Optional[Match]:
+        """
+        Получает матч по ID.
+        
+        Args:
+            match_id: ID матча
+        
+        Returns:
+            Объект матча или None
+        """
+        try:
+            matches_collection = self.db["matches"]
+            doc = await matches_collection.find_one({"id": match_id})
+            if not doc:
+                return None
+            return Match(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении матча {match_id}: {e}")
+            return None
+    
+    async def create_match(
+        self,
+        tournament_id: str,
+        name: str,
+        round_number: Optional[int] = None,
+    ) -> Match:
+        """
+        Создает новый матч в турнире.
+        
+        Args:
+            tournament_id: ID турнира
+            name: Название матча
+            round_number: Номер раунда (опционально)
+        
+        Returns:
+            Созданный матч
+        """
+        try:
+            import secrets
+            match_id = f"match_{secrets.token_urlsafe(12)}"
+            match = Match(
+                id=match_id,
+                tournament_id=tournament_id,
+                name=name,
+                round_number=round_number,
+            )
+            matches_collection = self.db["matches"]
+            await matches_collection.insert_one(match.model_dump())
+            _LOG.info(f"Создан матч {match_id} в турнире {tournament_id}")
+            return match
+        except Exception as e:
+            _LOG.error(f"Ошибка при создании матча: {e}")
+            raise
+    
+    async def save_match_result(
+        self,
+        match_id: str,
+        tournament_id: str,
+        participant_id: int | str,
+        is_solo: bool,
+        kills: int,
+    ) -> None:
+        """
+        Сохраняет результат матча.
+        
+        Args:
+            match_id: ID матча
+            tournament_id: ID турнира
+            participant_id: ID участника (user_id или team_id)
+            is_solo: Соло турнир или командный
+            kills: Количество киллов
+        """
+        try:
+            import secrets
+            result_id = f"match_result_{secrets.token_urlsafe(12)}"
+            match_results_collection = self.db["match_results"]
+            
+            result = MatchResult(
+                id=result_id,
+                match_id=match_id,
+                tournament_id=tournament_id,
+                player_id=int(participant_id) if is_solo else None,
+                team_id=str(participant_id) if not is_solo else None,
+                kills=kills,
+            )
+            
+            await match_results_collection.insert_one(result.model_dump())
+            _LOG.info(f"Сохранен результат матча {match_id} для участника {participant_id}: {kills} киллов")
+        except Exception as e:
+            _LOG.error(f"Ошибка при сохранении результата матча: {e}")
+            raise
+    
+    async def complete_match(
+        self,
+        match_id: str,
+    ) -> None:
+        """
+        Отмечает матч как завершенный.
+        
+        Args:
+            match_id: ID матча
+        """
+        try:
+            matches_collection = self.db["matches"]
+            await matches_collection.update_one(
+                {"id": match_id},
+                {"$set": {
+                    "is_completed": True,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Матч {match_id} завершен")
+        except Exception as e:
+            _LOG.error(f"Ошибка при завершении матча: {e}")
+            raise
+    
+    async def save_tournament_result(
+        self,
+        tournament_id: str,
+        participant_id: int | str,
+        is_solo: bool,
+        total_kills: int,
+    ) -> None:
+        """
+        Сохраняет итоговый результат турнира для участника.
+        
+        Args:
+            tournament_id: ID турнира
+            participant_id: ID участника (user_id или team_id)
+            is_solo: Соло турнир или командный
+            total_kills: Общее количество киллов
+        """
+        try:
+            import secrets
+            result_id = f"tournament_result_{secrets.token_urlsafe(12)}"
+            tournament_results_collection = self.db["tournament_results"]
+            
+            # Проверяем, есть ли уже результат
+            query = {
+                "tournament_id": tournament_id,
+            }
+            if is_solo:
+                query["player_id"] = int(participant_id)
+            else:
+                query["team_id"] = str(participant_id)
+            
+            existing = await tournament_results_collection.find_one(query)
+            
+            if existing:
+                # Обновляем существующий результат
+                await tournament_results_collection.update_one(
+                    query,
+                    {"$set": {
+                        "total_kills": total_kills,
+                        "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                    }},
+                )
+            else:
+                # Создаем новый результат
+                result = TournamentResult(
+                    id=result_id,
+                    tournament_id=tournament_id,
+                    player_id=int(participant_id) if is_solo else None,
+                    team_id=str(participant_id) if not is_solo else None,
+                    total_kills=total_kills,
+                )
+                await tournament_results_collection.insert_one(result.model_dump())
+            
+            _LOG.info(f"Сохранен результат турнира {tournament_id} для участника {participant_id}: {total_kills} киллов")
+        except Exception as e:
+            _LOG.error(f"Ошибка при сохранении результата турнира: {e}")
+            raise
+    
+    async def get_tournament_results(
+        self,
+        tournament_id: str,
+    ) -> list[TournamentResult]:
+        """
+        Получает результаты турнира.
+        
+        Args:
+            tournament_id: ID турнира
+        
+        Returns:
+            Список результатов
+        """
+        try:
+            tournament_results_collection = self.db["tournament_results"]
+            cursor = tournament_results_collection.find({"tournament_id": tournament_id})
+            results = []
+            async for doc in cursor:
+                results.append(TournamentResult(**doc))
+            return results
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении результатов турнира {tournament_id}: {e}")
+            return []
+    
+    async def update_tournament_result_position(
+        self,
+        result_id: str,
+        position: int,
+    ) -> None:
+        """
+        Обновляет позицию в результатах турнира.
+        
+        Args:
+            result_id: ID результата
+            position: Позиция
+        """
+        try:
+            tournament_results_collection = self.db["tournament_results"]
+            await tournament_results_collection.update_one(
+                {"id": result_id},
+                {"$set": {"position": position}},
+            )
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении позиции результата: {e}")
+            raise
+    
+    async def update_tournament_results_from_matches(
+        self,
+        tournament_id: str,
+    ) -> None:
+        """
+        Обновляет итоговые результаты турнира на основе результатов матчей.
+        
+        Args:
+            tournament_id: ID турнира
+        """
+        try:
+            match_results_collection = self.db["match_results"]
+            tournament_results_collection = self.db["tournament_results"]
+            
+            # Получаем все результаты матчей турнира
+            cursor = match_results_collection.find({"tournament_id": tournament_id})
+            
+            # Группируем по участникам
+            participant_kills: dict[tuple[str, Optional[int], Optional[str]], int] = {}
+            
+            async for doc in cursor:
+                result = MatchResult(**doc)
+                key = (tournament_id, result.player_id, result.team_id)
+                participant_kills[key] = participant_kills.get(key, 0) + result.kills
+            
+            # Обновляем или создаем итоговые результаты
+            for (tid, player_id, team_id), total_kills in participant_kills.items():
+                query = {"tournament_id": tid}
+                if player_id:
+                    query["player_id"] = player_id
+                if team_id:
+                    query["team_id"] = team_id
+                
+                existing = await tournament_results_collection.find_one(query)
+                if existing:
+                    await tournament_results_collection.update_one(
+                        query,
+                        {"$set": {
+                            "total_kills": total_kills,
+                            "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                        }},
+                    )
+                else:
+                    import secrets
+                    result_id = f"tournament_result_{secrets.token_urlsafe(12)}"
+                    result = TournamentResult(
+                        id=result_id,
+                        tournament_id=tid,
+                        player_id=player_id,
+                        team_id=team_id,
+                        total_kills=total_kills,
+                    )
+                    await tournament_results_collection.insert_one(result.model_dump())
+            
+            _LOG.info(f"Обновлены итоговые результаты турнира {tournament_id} на основе матчей")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении результатов турнира из матчей: {e}")
+            raise
+    
+    async def publish_tournament_results(
+        self,
+        tournament_id: str,
+    ) -> None:
+        """
+        Публикует результаты турнира.
+        
+        Args:
+            tournament_id: ID турнира
+        """
+        try:
+            # Обновляем статус результатов
+            tournament_results_collection = self.db["tournament_results"]
+            await tournament_results_collection.update_many(
+                {"tournament_id": tournament_id},
+                {"$set": {"is_published": True}},
+            )
+            
+            # Обновляем статус турнира
+            await self.tournaments_collection.update_one(
+                {"id": tournament_id},
+                {"$set": {
+                    "results_published": True,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            
+            _LOG.info(f"Результаты турнира {tournament_id} опубликованы")
+        except Exception as e:
+            _LOG.error(f"Ошибка при публикации результатов турнира: {e}")
             raise

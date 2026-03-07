@@ -1,7 +1,7 @@
 from typing import Optional
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-from src.models.mongo_models import Team, Tournament
+from src.models.mongo_models import Team, Tournament, Match
 from src.config import MINI_APP_URL
 
 
@@ -1192,5 +1192,280 @@ def get_admin_team_card_keyboard(
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_ratings_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для админ-панели рейтингов.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Обновить рейтинг",
+                    callback_data="admin_ratings_recalculate",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📅 Выбрать период",
+                    callback_data="admin_ratings_period",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⚙️ Настройка правил",
+                    callback_data="admin_ratings_rules",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_ratings_period_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора периода рейтинга.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📅 За всё время",
+                    callback_data="admin_ratings_period_all_time",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📅 За сезон",
+                    callback_data="admin_ratings_period_season",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📅 За месяц",
+                    callback_data="admin_ratings_period_month",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_ratings",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_ratings_rules_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для настройки правил рейтинга.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="👤 Рейтинг игроков",
+                    callback_data="admin_ratings_rules_player",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👥 Рейтинг команд",
+                    callback_data="admin_ratings_rules_team",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_ratings",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_ratings_metric_keyboard(
+    rating_type: str,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора метрики рейтинга.
+    
+    Args:
+        rating_type: Тип рейтинга (player или team)
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💀 Киллы",
+                    callback_data=f"admin_ratings_metric_{rating_type}_kills",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⭐ Очки",
+                    callback_data=f"admin_ratings_metric_{rating_type}_points",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_ratings_rules",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_results_tournaments_keyboard(
+    tournaments: list[Tournament],
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора турнира при внесении результатов.
+    
+    Args:
+        tournaments: Список турниров
+    """
+    keyboard_rows = []
+    
+    for tournament in tournaments:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"🏆 {tournament.name}",
+                callback_data=f"admin_results_tournament_{tournament.id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_back",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_results_method_keyboard(
+    tournament_id: str,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора метода внесения результатов.
+    
+    Args:
+        tournament_id: ID турнира
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📊 Вариант A: Итоговая цифра",
+                    callback_data=f"admin_results_method_a_{tournament_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎮 Вариант B: По матчам",
+                    callback_data=f"admin_results_method_b_{tournament_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_results",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_results_matches_keyboard(
+    tournament_id: str,
+    matches: list[Match],
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора матча.
+    
+    Args:
+        tournament_id: ID турнира
+        matches: Список матчей
+    """
+    keyboard_rows = []
+    
+    for match in matches:
+        status = "✅" if match.is_completed else "⏳"
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"{status} {match.name}",
+                callback_data=f"admin_results_match_{match.id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="➕ Создать матч",
+            callback_data=f"admin_results_create_match_{tournament_id}",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data=f"admin_results_tournament_{tournament_id}",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_results_draft_keyboard(
+    tournament_id: str,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для черновика результатов.
+    
+    Args:
+        tournament_id: ID турнира
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Опубликовать результаты",
+                    callback_data=f"admin_results_publish_{tournament_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✏️ Исправить",
+                    callback_data=f"admin_results_edit_{tournament_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data=f"admin_results_tournament_{tournament_id}",
+                ),
+            ],
+        ],
     )
     return keyboard

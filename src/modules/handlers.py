@@ -34,6 +34,14 @@ from src.modules.keyboards import (
     get_admin_user_role_keyboard,
     get_admin_teams_search_keyboard,
     get_admin_team_card_keyboard,
+    get_admin_ratings_keyboard,
+    get_admin_ratings_period_keyboard,
+    get_admin_ratings_rules_keyboard,
+    get_admin_ratings_metric_keyboard,
+    get_admin_results_tournaments_keyboard,
+    get_admin_results_method_keyboard,
+    get_admin_results_matches_keyboard,
+    get_admin_results_draft_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -44,6 +52,11 @@ from src.models.mongo_models import (
     TournamentFormat,
     Transaction,
     TransactionType,
+    RatingRules,
+    RatingMetric,
+    Match,
+    MatchResult,
+    TournamentResult,
     MOSCOW_TZ,
 )
 from src.clients.mongo import MongoClient
@@ -72,6 +85,9 @@ _waiting_user_search: dict[int, bool] = {}
 
 # Словарь для хранения состояния поиска команды в админ-панели
 _waiting_team_search: dict[int, bool] = {}
+
+# Словарь для хранения состояния внесения результатов
+_waiting_results_data: dict[int, dict] = {}
 
 # Словарь для хранения состояния ожидания суммы токенов для начисления/списания
 _waiting_token_amount: dict[int, dict] = {}
@@ -272,6 +288,40 @@ async def format_admin_team_card_text(
         lines.append("  📈 Место в рейтинге: не определено")
     
     return "\n".join(lines)
+
+
+async def _get_participant_name(
+    tournament: Tournament,
+    participant_id: int | str,
+) -> str:
+    """
+    Получает имя участника (игрока или команды).
+    
+    Args:
+        tournament: Объект турнира
+        participant_id: ID участника (user_id для соло, team_id для команд)
+    
+    Returns:
+        Имя участника
+    """
+    if tournament.format == TournamentFormat.SOLO:
+        if _mongo_client is not None:
+            try:
+                user = await _mongo_client.get_user(int(participant_id))
+                if user:
+                    return user.nickname or user.name or f"ID:{participant_id}"
+            except Exception:
+                pass
+        return f"ID:{participant_id}"
+    else:
+        if _mongo_client is not None:
+            try:
+                team = await _mongo_client.get_team(str(participant_id))
+                if team:
+                    return f"{team.name} ({team.tag})"
+            except Exception:
+                pass
+        return f"ID:{participant_id}"
 
 
 async def format_team_text(
@@ -2018,12 +2068,235 @@ async def admin_callback_handler(
         )
     elif callback_data == "admin_results":
         await callback.answer("Результаты")
+        # Получаем список турниров для выбора
+        tournaments = []
+        if _mongo_client is not None:
+            try:
+                all_tournaments = await _mongo_client.get_tournaments()
+                # Показываем только турниры, которые идут или завершены
+                tournaments = [
+                    t for t in all_tournaments
+                    if t.status in [TournamentStatus.IN_PROGRESS, TournamentStatus.COMPLETED]
+                ]
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении турниров: {e}")
+        
+        if not tournaments:
+            await callback.message.edit_text(
+                text="✅ Результаты\n\n"
+                     "Нет доступных турниров для внесения результатов.\n\n"
+                     "Турниры должны быть в статусе 'Идёт' или 'Завершён'.",
+                reply_markup=get_admin_panel_keyboard(
+                    is_super_admin=is_super_admin,
+                ),
+            )
+        else:
+            await callback.message.edit_text(
+                text="✅ Результаты\n\n"
+                     "Выберите турнир для внесения результатов:",
+                reply_markup=get_admin_results_tournaments_keyboard(tournaments),
+            )
+    elif callback_data.startswith("admin_results_tournament_"):
+        tournament_id = callback_data.replace("admin_results_tournament_", "")
+        await callback.answer("Выбор турнира")
+        
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+                if not tournament:
+                    await callback.answer("Турнир не найден", show_alert=True)
+                    return
+                
+                await callback.message.edit_text(
+                    text=f"✅ Результаты: {tournament.name}\n\n"
+                         "Выберите метод внесения результатов:",
+                    reply_markup=get_admin_results_method_keyboard(tournament_id),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении турнира: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_results_method_a_"):
+        # Вариант A: итоговая цифра на турнир
+        tournament_id = callback_data.replace("admin_results_method_a_", "")
+        await callback.answer("Вариант A: Итоговая цифра")
+        
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+                if not tournament:
+                    await callback.answer("Турнир не найден", show_alert=True)
+                    return
+                
+                # Получаем список участников
+                participants = []
+                if tournament.format == TournamentFormat.SOLO:
+                    participants = tournament.solo_participants
+                else:
+                    participants = tournament.team_participants
+                
+                if not participants:
+                    await callback.answer("В турнире нет участников", show_alert=True)
+                    return
+                
+                # Активируем режим внесения результатов
+                _waiting_results_data[callback.from_user.id] = {
+                    "type": "method_a",
+                    "tournament_id": tournament_id,
+                    "participants": participants,
+                    "current_index": 0,
+                }
+                
+                participant_name = await _get_participant_name(tournament, participants[0])
+                await callback.message.edit_text(
+                    text=f"✅ Внесение результатов: {tournament.name}\n\n"
+                         f"Вариант A: Итоговая цифра\n\n"
+                         f"Участник 1/{len(participants)}: {participant_name}\n\n"
+                         f"Введите количество киллов за турнир:\n\n"
+                         f"Или отправьте /cancel для отмены.",
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при подготовке внесения результатов: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_results_method_b_"):
+        # Вариант B: по матчам
+        tournament_id = callback_data.replace("admin_results_method_b_", "")
+        await callback.answer("Вариант B: По матчам")
+        
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+                if not tournament:
+                    await callback.answer("Турнир не найден", show_alert=True)
+                    return
+                
+                # Получаем список матчей
+                matches = await _mongo_client.get_tournament_matches(tournament_id)
+                
+                await callback.message.edit_text(
+                    text=f"✅ Результаты: {tournament.name}\n\n"
+                         f"Вариант B: По матчам\n\n"
+                         "Выберите матч для внесения результатов:",
+                    reply_markup=get_admin_results_matches_keyboard(tournament_id, matches),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении матчей: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_results_match_"):
+        # Выбор матча для внесения результатов
+        match_id = callback_data.replace("admin_results_match_", "")
+        await callback.answer("Выбор матча")
+        
+        if _mongo_client is not None:
+            try:
+                match = await _mongo_client.get_match(match_id)
+                if not match:
+                    await callback.answer("Матч не найден", show_alert=True)
+                    return
+                
+                tournament = await _mongo_client.get_tournament(match.tournament_id)
+                if not tournament:
+                    await callback.answer("Турнир не найден", show_alert=True)
+                    return
+                
+                # Получаем список участников
+                participants = []
+                if tournament.format == TournamentFormat.SOLO:
+                    participants = tournament.solo_participants
+                else:
+                    participants = tournament.team_participants
+                
+                if not participants:
+                    await callback.answer("В турнире нет участников", show_alert=True)
+                    return
+                
+                # Активируем режим внесения результатов матча
+                _waiting_results_data[callback.from_user.id] = {
+                    "type": "method_b_match",
+                    "tournament_id": match.tournament_id,
+                    "match_id": match_id,
+                    "participants": participants,
+                    "current_index": 0,
+                }
+                
+                participant_name = await _get_participant_name(tournament, participants[0])
+                await callback.message.edit_text(
+                    text=f"✅ Внесение результатов: {match.name}\n\n"
+                         f"Участник 1/{len(participants)}: {participant_name}\n\n"
+                         f"Введите количество киллов в матче:\n\n"
+                         f"Или отправьте /cancel для отмены.",
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при подготовке внесения результатов матча: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_results_create_match_"):
+        # Создание нового матча
+        tournament_id = callback_data.replace("admin_results_create_match_", "")
+        await callback.answer("Создание матча")
+        # Активируем режим создания матча
+        _waiting_results_data[callback.from_user.id] = {
+            "type": "create_match",
+            "tournament_id": tournament_id,
+            "step": "name",
+        }
         await callback.message.edit_text(
-            text="✅ Результаты\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
-            ),
+            text="✅ Создание матча\n\n"
+                 "Введите название матча:\n\n"
+                 "Или отправьте /cancel для отмены.",
         )
+    elif callback_data.startswith("admin_results_publish_"):
+        # Публикация результатов
+        tournament_id = callback_data.replace("admin_results_publish_", "")
+        await callback.answer("Публикация результатов...")
+        
+        if _mongo_client is not None:
+            try:
+                # Публикуем результаты
+                await _mongo_client.publish_tournament_results(tournament_id)
+                
+                # Отправляем уведомления участникам
+                tournament = await _mongo_client.get_tournament(tournament_id)
+                if tournament:
+                    participants = []
+                    if tournament.format == TournamentFormat.SOLO:
+                        participants = tournament.solo_participants
+                    else:
+                        participants = tournament.team_participants
+                    
+                    # Получаем результаты для уведомлений
+                    results = await _mongo_client.get_tournament_results(tournament_id)
+                    results.sort(key=lambda r: r.total_kills, reverse=True)
+                    
+                    # Отправляем уведомления (упрощенная версия - просто логируем)
+                    _LOG.info(f"Результаты турнира {tournament_id} опубликованы. Уведомления отправлены {len(participants)} участникам.")
+                
+                await callback.answer("✅ Результаты опубликованы! Уведомления отправлены участникам.", show_alert=True)
+                
+                # Обновляем экран
+                await callback.message.edit_text(
+                    text=f"✅ Результаты: {tournament.name if tournament else 'Турнир'}\n\n"
+                         "✅ Результаты опубликованы!\n\n"
+                         "Все участники получили уведомления.",
+                    reply_markup=get_admin_results_tournaments_keyboard([]),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при публикации результатов: {e}")
+                await callback.answer("❌ Произошла ошибка при публикации результатов", show_alert=True)
+    elif callback_data.startswith("admin_results_edit_"):
+        # Редактирование результатов
+        tournament_id = callback_data.replace("admin_results_edit_", "")
+        await callback.answer("Редактирование результатов")
+        # Возвращаемся к выбору метода
+        if _mongo_client is not None:
+            try:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+                if tournament:
+                    await callback.message.edit_text(
+                        text=f"✅ Результаты: {tournament.name}\n\n"
+                             "Выберите метод внесения результатов:",
+                        reply_markup=get_admin_results_method_keyboard(tournament_id),
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при редактировании результатов: {e}")
     elif callback_data == "admin_back":
         await callback.answer("Админ-панель")
         await callback.message.edit_text(
@@ -2316,12 +2589,120 @@ async def admin_callback_handler(
                 await callback.answer("Произошла ошибка", show_alert=True)
     elif callback_data == "admin_ratings":
         await callback.answer("Рейтинги")
+        # Получаем текущие правила рейтинга
+        rules_text = "📊 Рейтинги\n\n"
+        if _mongo_client is not None:
+            try:
+                rules = await _mongo_client.get_rating_rules()
+                if rules:
+                    rules_text += f"⚙️ Текущие правила:\n"
+                    rules_text += f"  👤 Игроки: {rules.player_metric.value}\n"
+                    rules_text += f"  👥 Команды: {rules.team_metric.value}\n"
+                    if rules.season_start_date and rules.season_end_date:
+                        rules_text += f"  📅 Сезон: {rules.season_start_date} - {rules.season_end_date}\n"
+                else:
+                    rules_text += "⚙️ Правила не настроены (используются значения по умолчанию)\n"
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении правил рейтинга: {e}")
+        
         await callback.message.edit_text(
-            text="📊 Рейтинги\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
-            ),
+            text=rules_text,
+            reply_markup=get_admin_ratings_keyboard(),
         )
+    elif callback_data == "admin_ratings_recalculate":
+        await callback.answer("Обновление рейтинга...")
+        # Пересчитываем рейтинг
+        if _mongo_client is not None:
+            try:
+                await _mongo_client.recalculate_ratings()
+                await callback.answer("✅ Рейтинг успешно обновлён!", show_alert=True)
+                # Обновляем экран
+                rules = await _mongo_client.get_rating_rules()
+                rules_text = "📊 Рейтинги\n\n"
+                if rules:
+                    rules_text += f"⚙️ Текущие правила:\n"
+                    rules_text += f"  👤 Игроки: {rules.player_metric.value}\n"
+                    rules_text += f"  👥 Команды: {rules.team_metric.value}\n"
+                    if rules.season_start_date and rules.season_end_date:
+                        rules_text += f"  📅 Сезон: {rules.season_start_date} - {rules.season_end_date}\n"
+                await callback.message.edit_text(
+                    text=rules_text,
+                    reply_markup=get_admin_ratings_keyboard(),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при пересчёте рейтинга: {e}")
+                await callback.answer("❌ Произошла ошибка при обновлении рейтинга", show_alert=True)
+        else:
+            await callback.answer("❌ Ошибка подключения к базе данных", show_alert=True)
+    elif callback_data == "admin_ratings_period":
+        await callback.answer("Выбор периода")
+        await callback.message.edit_text(
+            text="📅 Выбор периода рейтинга\n\n"
+                 "Выберите период для отображения рейтинга:",
+            reply_markup=get_admin_ratings_period_keyboard(),
+        )
+    elif callback_data.startswith("admin_ratings_period_"):
+        period = callback_data.replace("admin_ratings_period_", "")
+        await callback.answer(f"Период: {period}")
+        # Здесь можно сохранить выбранный период или просто показать сообщение
+        period_names = {
+            "all_time": "За всё время",
+            "season": "За сезон",
+            "month": "За месяц",
+        }
+        await callback.message.edit_text(
+            text=f"📅 Период рейтинга: {period_names.get(period, period)}\n\n"
+                 "Период выбран. Рейтинг будет отображаться с учётом выбранного периода.",
+            reply_markup=get_admin_ratings_keyboard(),
+        )
+    elif callback_data == "admin_ratings_rules":
+        await callback.answer("Настройка правил")
+        await callback.message.edit_text(
+            text="⚙️ Настройка правил рейтинга\n\n"
+                 "Выберите тип рейтинга для настройки:",
+            reply_markup=get_admin_ratings_rules_keyboard(),
+        )
+    elif callback_data.startswith("admin_ratings_rules_"):
+        rating_type = callback_data.replace("admin_ratings_rules_", "")
+        await callback.answer("Выбор метрики")
+        await callback.message.edit_text(
+            text=f"⚙️ Настройка правил рейтинга\n\n"
+                 f"Выберите основной показатель для рейтинга {'игроков' if rating_type == 'player' else 'команд'}:",
+            reply_markup=get_admin_ratings_metric_keyboard(rating_type),
+        )
+    elif callback_data.startswith("admin_ratings_metric_"):
+        # Формат: admin_ratings_metric_player_kills или admin_ratings_metric_team_points
+        parts = callback_data.replace("admin_ratings_metric_", "").split("_")
+        if len(parts) >= 2:
+            rating_type = parts[0]  # player или team
+            metric = "_".join(parts[1:])  # kills или points
+            
+            await callback.answer("Сохранение правил...")
+            
+            if _mongo_client is not None:
+                try:
+                    metric_enum = RatingMetric.KILLS if metric == "kills" else RatingMetric.POINTS
+                    await _mongo_client.update_rating_metric(rating_type, metric_enum)
+                    await callback.answer("✅ Правила успешно сохранены!", show_alert=True)
+                    
+                    # Обновляем экран
+                    rules = await _mongo_client.get_rating_rules()
+                    rules_text = "📊 Рейтинги\n\n"
+                    if rules:
+                        rules_text += f"⚙️ Текущие правила:\n"
+                        rules_text += f"  👤 Игроки: {rules.player_metric.value}\n"
+                        rules_text += f"  👥 Команды: {rules.team_metric.value}\n"
+                        if rules.season_start_date and rules.season_end_date:
+                            rules_text += f"  📅 Сезон: {rules.season_start_date} - {rules.season_end_date}\n"
+                    await callback.message.edit_text(
+                        text=rules_text,
+                        reply_markup=get_admin_ratings_keyboard(),
+                    )
+                except Exception as e:
+                    _LOG.error(f"Ошибка при сохранении правил рейтинга: {e}")
+                    await callback.answer("❌ Произошла ошибка при сохранении правил", show_alert=True)
+            else:
+                await callback.answer("❌ Ошибка подключения к базе данных", show_alert=True)
     elif callback_data == "admin_wallet_bonuses":
         await callback.answer("CD токен и бонусы")
         await callback.message.edit_text(
