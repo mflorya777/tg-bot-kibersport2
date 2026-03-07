@@ -4,6 +4,7 @@ import string
 import datetime as dt
 from typing import Optional
 from aiogram import types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from src.modules.keyboards import (
@@ -42,6 +43,11 @@ from src.modules.keyboards import (
     get_admin_results_method_keyboard,
     get_admin_results_matches_keyboard,
     get_admin_results_draft_keyboard,
+    get_admin_wallet_bonuses_keyboard,
+    get_admin_daily_bonus_settings_keyboard,
+    get_admin_promocodes_list_keyboard,
+    get_admin_promocode_card_keyboard,
+    get_admin_transaction_reasons_list_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -57,6 +63,9 @@ from src.models.mongo_models import (
     Match,
     MatchResult,
     TournamentResult,
+    Promocode,
+    BonusSettings,
+    TransactionReason,
     MOSCOW_TZ,
 )
 from src.clients.mongo import MongoClient
@@ -91,6 +100,12 @@ _waiting_results_data: dict[int, dict] = {}
 
 # Словарь для хранения состояния ожидания суммы токенов для начисления/списания
 _waiting_token_amount: dict[int, dict] = {}
+
+# Словарь для хранения состояния создания/редактирования промокодов
+_waiting_promocode_data: dict[int, dict] = {}
+
+# Словарь для хранения состояния создания/редактирования причин транзакций
+_waiting_transaction_reason_data: dict[int, dict] = {}
 
 
 def generate_team_id() -> str:
@@ -1194,8 +1209,9 @@ async def callback_handler(
                         await callback.answer("Вы уже получили ежедневный бонус сегодня!", show_alert=True)
                         return
                     
-                    # Выдаем бонус (50 CD токенов)
-                    bonus_amount = 50
+                    # Получаем настройки бонуса из БД
+                    bonus_settings = await _mongo_client.get_bonus_settings()
+                    bonus_amount = bonus_settings.daily_bonus_amount if bonus_settings else 10
                     await _mongo_client.add_transaction(
                         user_id=callback.from_user.id,
                         transaction_type=TransactionType.DEPOSIT,
@@ -2706,10 +2722,248 @@ async def admin_callback_handler(
     elif callback_data == "admin_wallet_bonuses":
         await callback.answer("CD токен и бонусы")
         await callback.message.edit_text(
-            text="💰 CD токен и бонусы\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
+            text="💰 CD токен и бонусы\n\n"
+                 "Управление настройками токенов и бонусов:",
+            reply_markup=get_admin_wallet_bonuses_keyboard(),
+        )
+    elif callback_data == "admin_bonus_daily_settings":
+        await callback.answer("Настройки ежедневного бонуса")
+        # Получаем настройки
+        settings_text = "🎁 Настройки ежедневного бонуса\n\n"
+        if _mongo_client is not None:
+            try:
+                settings = await _mongo_client.get_bonus_settings()
+                if settings:
+                    status = "✅ Включен" if settings.daily_bonus_enabled else "❌ Выключен"
+                    settings_text += f"Статус: {status}\n"
+                    settings_text += f"Сумма: {settings.daily_bonus_amount} токенов\n"
+                else:
+                    settings_text += "Настройки не найдены (используются значения по умолчанию)\n"
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении настроек бонусов: {e}")
+        
+        await callback.message.edit_text(
+            text=settings_text,
+            reply_markup=get_admin_daily_bonus_settings_keyboard(
+                enabled=settings.daily_bonus_enabled if settings else True,
             ),
+        )
+    elif callback_data == "admin_bonus_daily_toggle":
+        await callback.answer("Переключение ежедневного бонуса...")
+        if _mongo_client is not None:
+            try:
+                settings = await _mongo_client.get_bonus_settings()
+                new_enabled = not settings.daily_bonus_enabled if settings else False
+                await _mongo_client.update_bonus_settings(
+                    daily_bonus_enabled=new_enabled,
+                )
+                await callback.answer("✅ Настройки обновлены!", show_alert=True)
+                # Обновляем экран
+                settings = await _mongo_client.get_bonus_settings()
+                status = "✅ Включен" if settings.daily_bonus_enabled else "❌ Выключен"
+                await callback.message.edit_text(
+                    text=f"🎁 Настройки ежедневного бонуса\n\n"
+                         f"Статус: {status}\n"
+                         f"Сумма: {settings.daily_bonus_amount} токенов\n",
+                    reply_markup=get_admin_daily_bonus_settings_keyboard(
+                        enabled=settings.daily_bonus_enabled,
+                    ),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при обновлении настроек бонусов: {e}")
+                await callback.answer("❌ Произошла ошибка", show_alert=True)
+    elif callback_data == "admin_bonus_daily_amount":
+        await callback.answer("Изменение суммы")
+        _waiting_promocode_data[callback.from_user.id] = {
+            "type": "daily_bonus_amount",
+        }
+        await callback.message.edit_text(
+            text="🎁 Настройки ежедневного бонуса\n\n"
+                 "Введите новую сумму ежедневного бонуса (в токенах):\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+    elif callback_data == "admin_promocodes":
+        await callback.answer("Промокоды")
+        # Получаем список промокодов
+        promocodes = []
+        if _mongo_client is not None:
+            try:
+                promocodes = await _mongo_client.get_promocodes()
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении промокодов: {e}")
+        
+        await callback.message.edit_text(
+            text="🎟 Промокоды\n\n"
+                 "Список промокодов:",
+            reply_markup=get_admin_promocodes_list_keyboard(promocodes),
+        )
+    elif callback_data == "admin_promocode_create":
+        await callback.answer("Создание промокода")
+        _waiting_promocode_data[callback.from_user.id] = {
+            "type": "create_promocode",
+            "step": "code",
+        }
+        await callback.message.edit_text(
+            text="🎟 Создание промокода\n\n"
+                 "Шаг 1/5: Код промокода\n\n"
+                 "Введите код промокода (например, WELCOME):\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+    elif callback_data.startswith("admin_promocode_"):
+        promocode_id = callback_data.replace("admin_promocode_", "")
+        await callback.answer("Промокод")
+        
+        if _mongo_client is not None:
+            try:
+                promocode = await _mongo_client.get_promocode(promocode_id)
+                if not promocode:
+                    await callback.answer("Промокод не найден", show_alert=True)
+                    return
+                
+                # Формируем текст карточки
+                status = "✅ Активен" if promocode.is_active else "❌ Неактивен"
+                text = f"🎟 Промокод: {promocode.code}\n\n"
+                text += f"Статус: {status}\n"
+                text += f"Сумма: {promocode.amount} токенов\n"
+                text += f"Активаций: {promocode.activation_count}"
+                if promocode.activation_limit:
+                    text += f" / {promocode.activation_limit}"
+                text += "\n"
+                if promocode.description:
+                    text += f"Описание: {promocode.description}\n"
+                if promocode.valid_from:
+                    text += f"Действует с: {promocode.valid_from.strftime('%d.%m.%Y %H:%M')}\n"
+                if promocode.valid_until:
+                    text += f"Действует до: {promocode.valid_until.strftime('%d.%m.%Y %H:%M')}\n"
+                
+                await callback.message.edit_text(
+                    text=text,
+                    reply_markup=get_admin_promocode_card_keyboard(promocode_id),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении промокода: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_promocode_toggle_"):
+        promocode_id = callback_data.replace("admin_promocode_toggle_", "")
+        await callback.answer("Переключение статуса...")
+        
+        if _mongo_client is not None:
+            try:
+                promocode = await _mongo_client.get_promocode(promocode_id)
+                if not promocode:
+                    await callback.answer("Промокод не найден", show_alert=True)
+                    return
+                
+                await _mongo_client.toggle_promocode(promocode_id, not promocode.is_active)
+                await callback.answer("✅ Статус обновлён!", show_alert=True)
+                
+                # Обновляем экран
+                promocode = await _mongo_client.get_promocode(promocode_id)
+                status = "✅ Активен" if promocode.is_active else "❌ Неактивен"
+                text = f"🎟 Промокод: {promocode.code}\n\n"
+                text += f"Статус: {status}\n"
+                text += f"Сумма: {promocode.amount} токенов\n"
+                text += f"Активаций: {promocode.activation_count}"
+                if promocode.activation_limit:
+                    text += f" / {promocode.activation_limit}"
+                text += "\n"
+                if promocode.description:
+                    text += f"Описание: {promocode.description}\n"
+                if promocode.valid_from:
+                    text += f"Действует с: {promocode.valid_from.strftime('%d.%m.%Y %H:%M')}\n"
+                if promocode.valid_until:
+                    text += f"Действует до: {promocode.valid_until.strftime('%d.%m.%Y %H:%M')}\n"
+                
+                await callback.message.edit_text(
+                    text=text,
+                    reply_markup=get_admin_promocode_card_keyboard(promocode_id),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при переключении промокода: {e}")
+                await callback.answer("❌ Произошла ошибка", show_alert=True)
+    elif callback_data == "admin_transaction_reasons":
+        await callback.answer("Причины транзакций")
+        # Получаем список причин
+        reasons = []
+        if _mongo_client is not None:
+            try:
+                reasons = await _mongo_client.get_transaction_reasons()
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении причин транзакций: {e}")
+        
+        await callback.message.edit_text(
+            text="📝 Причины транзакций\n\n"
+                 "Шаблоны для истории операций:",
+            reply_markup=get_admin_transaction_reasons_list_keyboard(reasons),
+        )
+    elif callback_data == "admin_transaction_reason_create":
+        await callback.answer("Создание шаблона")
+        _waiting_transaction_reason_data[callback.from_user.id] = {
+            "type": "create_reason",
+            "step": "name",
+        }
+        await callback.message.edit_text(
+            text="📝 Создание шаблона причины транзакции\n\n"
+                 "Шаг 1/3: Название\n\n"
+                 "Введите название причины (например, 'Покупка в магазине'):\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+    elif callback_data.startswith("admin_transaction_reason_"):
+        reason_id = callback_data.replace("admin_transaction_reason_", "")
+        await callback.answer("Шаблон причины")
+        
+        if _mongo_client is not None:
+            try:
+                reason = await _mongo_client.get_transaction_reason(reason_id)
+                if not reason:
+                    await callback.answer("Шаблон не найден", show_alert=True)
+                    return
+                
+                # Формируем текст карточки
+                status = "✅ Активен" if reason.is_active else "❌ Неактивен"
+                type_text = "Начисление" if reason.transaction_type == TransactionType.DEPOSIT else "Списание"
+                text = f"📝 Шаблон: {reason.name}\n\n"
+                text += f"Статус: {status}\n"
+                text += f"Тип: {type_text}\n"
+                if reason.description:
+                    text += f"Описание: {reason.description}\n"
+                
+                # Пока просто показываем информацию (можно добавить редактирование)
+                await callback.message.edit_text(
+                    text=text,
+                    reply_markup=get_admin_transaction_reasons_list_keyboard(
+                        await _mongo_client.get_transaction_reasons(),
+                    ),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении шаблона: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_reason_type_"):
+        # Выбор типа транзакции при создании шаблона
+        transaction_type_str = callback_data.replace("admin_reason_type_", "")
+        transaction_type = TransactionType.DEPOSIT if transaction_type_str == "deposit" else TransactionType.WITHDRAWAL
+        
+        user_id = callback.from_user.id
+        if user_id in _waiting_transaction_reason_data:
+            _waiting_transaction_reason_data[user_id]["transaction_type"] = transaction_type
+            _waiting_transaction_reason_data[user_id]["step"] = "description"
+            
+            await callback.answer("Тип выбран")
+            await callback.message.edit_text(
+                text=f"📝 Создание шаблона причины транзакции\n\n"
+                     f"Название: {_waiting_transaction_reason_data[user_id]['name']}\n"
+                     f"Тип: {'Начисление' if transaction_type == TransactionType.DEPOSIT else 'Списание'}\n\n"
+                     f"Шаг 3/3: Описание (опционально)\n\n"
+                     f"Введите описание или 'нет' для пропуска:\n\n"
+                     f"Или отправьте /cancel для отмены.",
+            )
+    elif callback_data == "admin_reason_cancel":
+        user_id = callback.from_user.id
+        if user_id in _waiting_transaction_reason_data:
+            _waiting_transaction_reason_data.pop(user_id, None)
+        await callback.answer("Отменено")
+        await callback.message.edit_text(
+            text="❌ Создание шаблона отменено.",
         )
     elif callback_data == "admin_promotions":
         await callback.answer("Акции и розыгрыши")
@@ -3559,19 +3813,16 @@ async def promocode_message_handler(
     
     promocode = message.text.strip().upper()
     
-    # Проверяем промокод (пока тестовые промокоды)
-    valid_promocodes = {
-        "TEST100": 100,
-        "BONUS50": 50,
-        "WELCOME": 25,
-    }
-    
-    if promocode in valid_promocodes:
-        amount = valid_promocodes[promocode]
-        
-        # Добавляем транзакцию
-        if _mongo_client is not None:
-            try:
+    # Проверяем промокод в базе данных
+    if _mongo_client is not None:
+        try:
+            success, message_text, amount = await _mongo_client.activate_promocode(
+                promocode,
+                user_id,
+            )
+            
+            if success and amount:
+                # Добавляем транзакцию
                 await _mongo_client.add_transaction(
                     user_id=user_id,
                     transaction_type=TransactionType.DEPOSIT,
@@ -3582,29 +3833,26 @@ async def promocode_message_handler(
                 new_balance = await _mongo_client.get_user_balance(user_id)
                 
                 await message.answer(
-                    f"✅ Промокод активирован!\n\n"
-                    f"💰 Начислено: {amount} CD токенов\n"
+                    f"✅ {message_text}\n\n"
                     f"💵 Новый баланс: {new_balance} CD токенов",
                     reply_markup=get_wallet_keyboard(),
                 )
-            except Exception as e:
-                _LOG.error(f"Ошибка при активации промокода: {e}")
+            else:
                 await message.answer(
-                    "❌ Произошла ошибка при активации промокода. Попробуйте позже.",
+                    f"❌ {message_text}",
                     reply_markup=get_wallet_keyboard(),
                 )
-        else:
+        except Exception as e:
+            _LOG.error(f"Ошибка при активации промокода: {e}")
             await message.answer(
-                "❌ Ошибка подключения к базе данных.",
+                "❌ Произошла ошибка при активации промокода. Попробуйте позже.",
                 reply_markup=get_wallet_keyboard(),
             )
     else:
         await message.answer(
-            f"❌ Промокод <b>{promocode}</b> не найден или уже использован.\n\n"
-            "Попробуйте другой промокод или отправьте /cancel для отмены.",
-            parse_mode="HTML",
+            "❌ Ошибка подключения к базе данных.",
+            reply_markup=get_wallet_keyboard(),
         )
-        return
     
     # Сбрасываем флаг ожидания
     _waiting_promocode.pop(user_id, None)
@@ -4118,3 +4366,297 @@ async def tournament_create_message_handler(
         await message.answer(
             "❌ Произошла ошибка. Попробуйте снова или отправьте /cancel для отмены.",
         )
+
+
+async def admin_promocode_data_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для создания/редактирования промокодов и настроек бонусов.
+    """
+    user_id = message.from_user.id
+    
+    if user_id not in _waiting_promocode_data:
+        return
+    
+    data = _waiting_promocode_data[user_id]
+    result_type = data.get("type")
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_promocode_data.pop(user_id, None)
+        await message.answer("❌ Операция отменена.")
+        return
+    
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    if result_type == "daily_bonus_amount":
+        try:
+            amount = int(message.text.strip())
+            if amount < 0:
+                await message.answer(
+                    "❌ Сумма не может быть отрицательной.\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            if _mongo_client is not None:
+                await _mongo_client.update_bonus_settings(
+                    daily_bonus_amount=amount,
+                )
+                _waiting_promocode_data.pop(user_id, None)
+                await message.answer(
+                    f"✅ Сумма ежедневного бонуса обновлена: {amount} токенов",
+                )
+        except ValueError:
+            await message.answer(
+                "❌ Неверный формат. Введите число.\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+    elif result_type == "create_promocode":
+        step = data.get("step", "code")
+        
+        if step == "code":
+            code = message.text.strip().upper()
+            if not code:
+                await message.answer(
+                    "❌ Код промокода не может быть пустым.\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            # Проверяем, не существует ли уже такой промокод
+            if _mongo_client is not None:
+                existing = await _mongo_client.get_promocode_by_code(code)
+                if existing:
+                    await message.answer(
+                        f"❌ Промокод '{code}' уже существует.\n\n"
+                        "Введите другой код:\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+                    return
+            
+            data["code"] = code
+            data["step"] = "amount"
+            await message.answer(
+                f"✅ Код промокода: {code}\n\n"
+                "Шаг 2/5: Сумма\n\n"
+                "Введите количество токенов для начисления:\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+        elif step == "amount":
+            try:
+                amount = int(message.text.strip())
+                if amount <= 0:
+                    await message.answer(
+                        "❌ Сумма должна быть больше 0.\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+                    return
+                
+                data["amount"] = amount
+                data["step"] = "description"
+                await message.answer(
+                    f"✅ Сумма: {amount} токенов\n\n"
+                    "Шаг 3/5: Описание (опционально)\n\n"
+                    "Введите описание промокода или 'нет' для пропуска:\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+            except ValueError:
+                await message.answer(
+                    "❌ Неверный формат. Введите число.\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+        elif step == "description":
+            description = message.text.strip()
+            if description.lower() == "нет":
+                description = ""
+            data["description"] = description
+            data["step"] = "limit"
+            await message.answer(
+                f"✅ Описание: {description if description else 'не указано'}\n\n"
+                "Шаг 4/5: Лимит активаций\n\n"
+                "Введите лимит активаций (число) или 'нет' для безлимита:\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+        elif step == "limit":
+            limit_text = message.text.strip().lower()
+            activation_limit = None
+            if limit_text != "нет":
+                try:
+                    activation_limit = int(limit_text)
+                    if activation_limit <= 0:
+                        await message.answer(
+                            "❌ Лимит должен быть больше 0.\n\n"
+                            "Или отправьте /cancel для отмены.",
+                        )
+                        return
+                except ValueError:
+                    await message.answer(
+                        "❌ Неверный формат. Введите число или 'нет'.\n\n"
+                        "Или отправьте /cancel для отмены.",
+                    )
+                    return
+            
+            data["activation_limit"] = activation_limit
+            data["step"] = "dates"
+            await message.answer(
+                f"✅ Лимит: {activation_limit if activation_limit else 'безлимит'}\n\n"
+                "Шаг 5/5: Срок действия\n\n"
+                "Введите даты в формате:\n"
+                "<b>ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ</b>\n"
+                "(начало | конец) или 'нет' для бессрочного:\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+        elif step == "dates":
+            dates_text = message.text.strip().lower()
+            valid_from = None
+            valid_until = None
+            
+            if dates_text != "нет":
+                try:
+                    parts = dates_text.split("|")
+                    if len(parts) != 2:
+                        raise ValueError
+                    
+                    from_str = parts[0].strip()
+                    until_str = parts[1].strip()
+                    
+                    valid_from = dt.datetime.strptime(from_str, "%d.%m.%Y %H:%M")
+                    valid_until = dt.datetime.strptime(until_str, "%d.%m.%Y %H:%M")
+                    
+                    # Устанавливаем московский часовой пояс
+                    valid_from = valid_from.replace(tzinfo=MOSCOW_TZ)
+                    valid_until = valid_until.replace(tzinfo=MOSCOW_TZ)
+                    
+                    if valid_until <= valid_from:
+                        await message.answer(
+                            "❌ Дата окончания должна быть позже даты начала.\n\n"
+                            "Или отправьте /cancel для отмены.",
+                        )
+                        return
+                except ValueError:
+                    await message.answer(
+                        "❌ Неверный формат дат.\n\n"
+                        "Введите даты в формате: <b>ДД.ММ.ГГГГ ЧЧ:ММ | ДД.ММ.ГГГГ ЧЧ:ММ</b>\n"
+                        "Или отправьте /cancel для отмены.",
+                        parse_mode="HTML",
+                    )
+                    return
+            
+            # Создаем промокод
+            if _mongo_client is not None:
+                try:
+                    promocode = await _mongo_client.create_promocode(
+                        code=data["code"],
+                        amount=data["amount"],
+                        description=data.get("description", ""),
+                        activation_limit=data.get("activation_limit"),
+                        valid_from=valid_from,
+                        valid_until=valid_until,
+                    )
+                    _waiting_promocode_data.pop(user_id, None)
+                    await message.answer(
+                        f"✅ Промокод '{promocode.code}' успешно создан!\n\n"
+                        f"Сумма: {promocode.amount} токенов\n"
+                        f"Лимит: {promocode.activation_limit if promocode.activation_limit else 'безлимит'}",
+                    )
+                except Exception as e:
+                    _LOG.error(f"Ошибка при создании промокода: {e}")
+                    await message.answer("❌ Произошла ошибка при создании промокода.")
+
+
+async def admin_transaction_reason_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для создания/редактирования причин транзакций.
+    """
+    user_id = message.from_user.id
+    
+    if user_id not in _waiting_transaction_reason_data:
+        return
+    
+    data = _waiting_transaction_reason_data[user_id]
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_transaction_reason_data.pop(user_id, None)
+        await message.answer("❌ Операция отменена.")
+        return
+    
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    result_type = data.get("type")
+    
+    if result_type == "create_reason":
+        step = data.get("step", "name")
+        
+        if step == "name":
+            name = message.text.strip()
+            if not name:
+                await message.answer(
+                    "❌ Название не может быть пустым.\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
+            
+            data["name"] = name
+            data["step"] = "type"
+            await message.answer(
+                f"✅ Название: {name}\n\n"
+                "Шаг 2/3: Тип транзакции\n\n"
+                "Выберите тип:",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="➕ Начисление",
+                                callback_data="admin_reason_type_deposit",
+                            ),
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="➖ Списание",
+                                callback_data="admin_reason_type_withdrawal",
+                            ),
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="❌ Отмена",
+                                callback_data="admin_reason_cancel",
+                            ),
+                        ],
+                    ],
+                ),
+            )
+        elif step == "description":
+            description = message.text.strip()
+            if description.lower() == "нет":
+                description = ""
+            
+            # Создаем шаблон
+            if _mongo_client is not None:
+                try:
+                    reason = await _mongo_client.create_transaction_reason(
+                        name=data["name"],
+                        description=description,
+                        transaction_type=data["transaction_type"],
+                    )
+                    _waiting_transaction_reason_data.pop(user_id, None)
+                    await message.answer(
+                        f"✅ Шаблон '{reason.name}' успешно создан!",
+                    )
+                except Exception as e:
+                    _LOG.error(f"Ошибка при создании шаблона: {e}")
+                    await message.answer("❌ Произошла ошибка при создании шаблона.")

@@ -18,6 +18,9 @@ from src.models.mongo_models import (
     Match,
     MatchResult,
     TournamentResult,
+    Promocode,
+    BonusSettings,
+    TransactionReason,
 )
 from src.models.user_roles import UserRole
 
@@ -1508,4 +1511,322 @@ class MongoClient:
             _LOG.info(f"Результаты турнира {tournament_id} опубликованы")
         except Exception as e:
             _LOG.error(f"Ошибка при публикации результатов турнира: {e}")
+            raise
+
+    async def get_bonus_settings(
+        self,
+    ) -> Optional[BonusSettings]:
+        """
+        Получает настройки бонусов.
+        
+        Returns:
+            Объект настроек бонусов или None
+        """
+        try:
+            settings_collection = self.db["settings"]
+            doc = await settings_collection.find_one({"id": "bonus_settings"})
+            if not doc:
+                # Создаем настройки по умолчанию
+                default_settings = BonusSettings()
+                await settings_collection.insert_one(default_settings.model_dump())
+                return default_settings
+            return BonusSettings(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении настроек бонусов: {e}")
+            return BonusSettings()
+    
+    async def update_bonus_settings(
+        self,
+        daily_bonus_enabled: Optional[bool] = None,
+        daily_bonus_amount: Optional[int] = None,
+    ) -> None:
+        """
+        Обновляет настройки бонусов.
+        
+        Args:
+            daily_bonus_enabled: Включен ли ежедневный бонус
+            daily_bonus_amount: Сумма ежедневного бонуса
+        """
+        try:
+            settings_collection = self.db["settings"]
+            update_data = {
+                "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+            }
+            
+            if daily_bonus_enabled is not None:
+                update_data["daily_bonus_enabled"] = daily_bonus_enabled
+            if daily_bonus_amount is not None:
+                update_data["daily_bonus_amount"] = daily_bonus_amount
+            
+            await settings_collection.update_one(
+                {"id": "bonus_settings"},
+                {"$set": update_data},
+                upsert=True,
+            )
+            _LOG.info("Настройки бонусов обновлены")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении настроек бонусов: {e}")
+            raise
+    
+    async def get_promocodes(
+        self,
+    ) -> list[Promocode]:
+        """
+        Получает список всех промокодов.
+        
+        Returns:
+            Список промокодов
+        """
+        try:
+            promocodes_collection = self.db["promocodes"]
+            cursor = promocodes_collection.find({})
+            promocodes = []
+            async for doc in cursor:
+                promocodes.append(Promocode(**doc))
+            return promocodes
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении промокодов: {e}")
+            return []
+    
+    async def get_promocode(
+        self,
+        promocode_id: str,
+    ) -> Optional[Promocode]:
+        """
+        Получает промокод по ID.
+        
+        Args:
+            promocode_id: ID промокода
+        
+        Returns:
+            Объект промокода или None
+        """
+        try:
+            promocodes_collection = self.db["promocodes"]
+            doc = await promocodes_collection.find_one({"id": promocode_id})
+            if not doc:
+                return None
+            return Promocode(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении промокода {promocode_id}: {e}")
+            return None
+    
+    async def get_promocode_by_code(
+        self,
+        code: str,
+    ) -> Optional[Promocode]:
+        """
+        Получает промокод по коду.
+        
+        Args:
+            code: Код промокода
+        
+        Returns:
+            Объект промокода или None
+        """
+        try:
+            promocodes_collection = self.db["promocodes"]
+            doc = await promocodes_collection.find_one({"code": code.upper()})
+            if not doc:
+                return None
+            return Promocode(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении промокода по коду {code}: {e}")
+            return None
+    
+    async def create_promocode(
+        self,
+        code: str,
+        amount: int,
+        description: str = "",
+        activation_limit: Optional[int] = None,
+        valid_from: Optional[dt.datetime] = None,
+        valid_until: Optional[dt.datetime] = None,
+    ) -> Promocode:
+        """
+        Создает новый промокод.
+        
+        Args:
+            code: Код промокода
+            amount: Количество токенов
+            description: Описание
+            activation_limit: Лимит активаций
+            valid_from: Дата начала действия
+            valid_until: Дата окончания действия
+        
+        Returns:
+            Созданный промокод
+        """
+        try:
+            import secrets
+            promocode_id = f"promocode_{secrets.token_urlsafe(12)}"
+            promocode = Promocode(
+                id=promocode_id,
+                code=code.upper(),
+                amount=amount,
+                description=description,
+                activation_limit=activation_limit,
+                valid_from=valid_from,
+                valid_until=valid_until,
+            )
+            promocodes_collection = self.db["promocodes"]
+            await promocodes_collection.insert_one(promocode.model_dump())
+            _LOG.info(f"Создан промокод {code}")
+            return promocode
+        except Exception as e:
+            _LOG.error(f"Ошибка при создании промокода: {e}")
+            raise
+    
+    async def toggle_promocode(
+        self,
+        promocode_id: str,
+        is_active: bool,
+    ) -> None:
+        """
+        Переключает статус промокода.
+        
+        Args:
+            promocode_id: ID промокода
+            is_active: Активен ли промокод
+        """
+        try:
+            promocodes_collection = self.db["promocodes"]
+            await promocodes_collection.update_one(
+                {"id": promocode_id},
+                {"$set": {
+                    "is_active": is_active,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Промокод {promocode_id} {'активирован' if is_active else 'деактивирован'}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при переключении промокода: {e}")
+            raise
+    
+    async def activate_promocode(
+        self,
+        code: str,
+        user_id: int,
+    ) -> tuple[bool, str, Optional[int]]:
+        """
+        Активирует промокод для пользователя.
+        
+        Args:
+            code: Код промокода
+            user_id: ID пользователя
+        
+        Returns:
+            Кортеж (успех, сообщение, количество токенов)
+        """
+        try:
+            promocode = await self.get_promocode_by_code(code)
+            if not promocode:
+                return False, "Промокод не найден", None
+            
+            if not promocode.is_active:
+                return False, "Промокод неактивен", None
+            
+            # Проверяем срок действия
+            now = dt.datetime.now(tz=MOSCOW_TZ)
+            if promocode.valid_from and now < promocode.valid_from:
+                return False, "Промокод еще не действует", None
+            
+            if promocode.valid_until and now > promocode.valid_until:
+                return False, "Срок действия промокода истек", None
+            
+            # Проверяем лимит активаций
+            if promocode.activation_limit:
+                if promocode.activation_count >= promocode.activation_limit:
+                    return False, "Достигнут лимит активаций промокода", None
+            
+            # Проверяем, не использовал ли пользователь уже этот промокод
+            # (можно добавить отдельную коллекцию для отслеживания использованных промокодов)
+            
+            # Увеличиваем счетчик активаций
+            promocodes_collection = self.db["promocodes"]
+            await promocodes_collection.update_one(
+                {"id": promocode.id},
+                {"$inc": {"activation_count": 1}},
+            )
+            
+            return True, f"Промокод активирован! Начислено {promocode.amount} токенов", promocode.amount
+        except Exception as e:
+            _LOG.error(f"Ошибка при активации промокода: {e}")
+            return False, "Произошла ошибка при активации промокода", None
+    
+    async def get_transaction_reasons(
+        self,
+    ) -> list[TransactionReason]:
+        """
+        Получает список причин транзакций.
+        
+        Returns:
+            Список причин
+        """
+        try:
+            reasons_collection = self.db["transaction_reasons"]
+            cursor = reasons_collection.find({})
+            reasons = []
+            async for doc in cursor:
+                reasons.append(TransactionReason(**doc))
+            return reasons
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении причин транзакций: {e}")
+            return []
+
+    async def get_transaction_reason(
+        self,
+        reason_id: str,
+    ) -> Optional[TransactionReason]:
+        """
+        Получает шаблон причины транзакции по ID.
+        
+        Args:
+            reason_id: ID шаблона
+        
+        Returns:
+            Объект шаблона или None
+        """
+        try:
+            reasons_collection = self.db["transaction_reasons"]
+            doc = await reasons_collection.find_one({"id": reason_id})
+            if not doc:
+                return None
+            return TransactionReason(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении шаблона причины {reason_id}: {e}")
+            return None
+    
+    async def create_transaction_reason(
+        self,
+        name: str,
+        description: str = "",
+        transaction_type: TransactionType = TransactionType.DEPOSIT,
+    ) -> TransactionReason:
+        """
+        Создает новый шаблон причины транзакции.
+        
+        Args:
+            name: Название причины
+            description: Описание
+            transaction_type: Тип транзакции
+        
+        Returns:
+            Созданный шаблон
+        """
+        try:
+            import secrets
+            reason_id = f"transaction_reason_{secrets.token_urlsafe(12)}"
+            reason = TransactionReason(
+                id=reason_id,
+                name=name,
+                description=description,
+                transaction_type=transaction_type,
+            )
+            reasons_collection = self.db["transaction_reasons"]
+            await reasons_collection.insert_one(reason.model_dump())
+            _LOG.info(f"Создан шаблон причины транзакции: {name}")
+            return reason
+        except Exception as e:
+            _LOG.error(f"Ошибка при создании шаблона причины транзакции: {e}")
             raise

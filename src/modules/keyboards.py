@@ -1,7 +1,14 @@
 from typing import Optional
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-from src.models.mongo_models import Team, Tournament, Match
+from src.models.mongo_models import (
+    Team,
+    Tournament,
+    Match,
+    Promocode,
+    TransactionReason,
+    TransactionType,
+)
 from src.config import MINI_APP_URL
 
 
@@ -1467,5 +1474,189 @@ def get_admin_results_draft_keyboard(
                 ),
             ],
         ],
+    )
+    return keyboard
+
+
+def get_admin_wallet_bonuses_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для админ-панели CD токен и бонусы.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎁 Ежедневный бонус",
+                    callback_data="admin_bonus_daily_settings",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎟 Промокоды",
+                    callback_data="admin_promocodes",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📝 Причины транзакций",
+                    callback_data="admin_transaction_reasons",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_daily_bonus_settings_keyboard(
+    enabled: bool,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для настройки ежедневного бонуса.
+    
+    Args:
+        enabled: Включен ли ежедневный бонус
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{'✅' if enabled else '❌'} {'Выключить' if enabled else 'Включить'}",
+                    callback_data=f"admin_bonus_daily_toggle",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💰 Изменить сумму",
+                    callback_data="admin_bonus_daily_amount",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_wallet_bonuses",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_promocodes_list_keyboard(
+    promocodes: list[Promocode],
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для списка промокодов.
+    
+    Args:
+        promocodes: Список промокодов
+    """
+    keyboard_rows = []
+    
+    for promocode in promocodes:
+        status = "✅" if promocode.is_active else "❌"
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"{status} {promocode.code} ({promocode.amount} токенов)",
+                callback_data=f"admin_promocode_{promocode.id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="➕ Создать промокод",
+            callback_data="admin_promocode_create",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_wallet_bonuses",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_promocode_card_keyboard(
+    promocode_id: str,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для карточки промокода.
+    
+    Args:
+        promocode_id: ID промокода
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅/❌ Активировать/Деактивировать",
+                    callback_data=f"admin_promocode_toggle_{promocode_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✏️ Редактировать",
+                    callback_data=f"admin_promocode_edit_{promocode_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_promocodes",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_transaction_reasons_list_keyboard(
+    reasons: list[TransactionReason],
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для списка причин транзакций.
+    
+    Args:
+        reasons: Список причин
+    """
+    keyboard_rows = []
+    
+    for reason in reasons:
+        status = "✅" if reason.is_active else "❌"
+        type_icon = "➕" if reason.transaction_type == TransactionType.DEPOSIT else "➖"
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"{status} {type_icon} {reason.name}",
+                callback_data=f"admin_transaction_reason_{reason.id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="➕ Создать шаблон",
+            callback_data="admin_transaction_reason_create",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_wallet_bonuses",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
     )
     return keyboard

@@ -121,10 +121,25 @@ async def register_handlers(
             return
         
         # Проверяем состояние внесения результатов
+        from src.modules.handlers import _waiting_promocode_data, _waiting_transaction_reason_data
         if user_id in _waiting_results_data:
             print(f"[DEBUG] >>> Вызываем admin_results_message_handler для пользователя {user_id}")
             from src.modules.handlers import admin_results_message_handler
             await admin_results_message_handler(message)
+            return
+        
+        # Проверяем состояние создания/редактирования промокодов
+        if user_id in _waiting_promocode_data:
+            print(f"[DEBUG] >>> Вызываем admin_promocode_data_message_handler для пользователя {user_id}")
+            from src.modules.handlers import admin_promocode_data_message_handler
+            await admin_promocode_data_message_handler(message)
+            return
+        
+        # Проверяем состояние создания/редактирования причин транзакций
+        if user_id in _waiting_transaction_reason_data:
+            print(f"[DEBUG] >>> Вызываем admin_transaction_reason_message_handler для пользователя {user_id}")
+            from src.modules.handlers import admin_transaction_reason_message_handler
+            await admin_transaction_reason_message_handler(message)
             return
         
         # Если ни одно состояние не активно, ничего не делаем

@@ -470,3 +470,105 @@ class TournamentResult(BaseModel):
         None,
         description="Дата последнего обновления",
     )
+
+
+class Promocode(BaseModel):
+    """
+    Промокод для начисления бонусов.
+    """
+    id: str = Field(
+        ...,
+        description="Уникальный ID промокода",
+    )
+    code: str = Field(
+        ...,
+        description="Код промокода (например, WELCOME)",
+    )
+    amount: int = Field(
+        ...,
+        description="Количество токенов для начисления",
+    )
+    description: str = Field(
+        default="",
+        description="Описание промокода",
+    )
+    is_active: bool = Field(
+        default=True,
+        description="Активен ли промокод",
+    )
+    valid_from: Optional[dt.datetime] = Field(
+        None,
+        description="Дата начала действия",
+    )
+    valid_until: Optional[dt.datetime] = Field(
+        None,
+        description="Дата окончания действия",
+    )
+    activation_limit: Optional[int] = Field(
+        None,
+        description="Лимит активаций (None = безлимит)",
+    )
+    activation_count: int = Field(
+        default=0,
+        description="Количество активаций",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата создания промокода",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )
+
+
+class BonusSettings(BaseModel):
+    """
+    Настройки бонусов.
+    """
+    id: str = Field(
+        default="bonus_settings",
+        description="ID настроек (всегда один экземпляр)",
+    )
+    daily_bonus_enabled: bool = Field(
+        default=True,
+        description="Включен ли ежедневный бонус",
+    )
+    daily_bonus_amount: int = Field(
+        default=10,
+        description="Количество токенов ежедневного бонуса",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )
+
+
+class TransactionReason(BaseModel):
+    """
+    Шаблон причины транзакции.
+    """
+    id: str = Field(
+        ...,
+        description="Уникальный ID шаблона",
+    )
+    name: str = Field(
+        ...,
+        description="Название причины",
+    )
+    description: str = Field(
+        default="",
+        description="Описание причины",
+    )
+    transaction_type: TransactionType = Field(
+        ...,
+        description="Тип транзакции (начисление/списание)",
+    )
+    is_active: bool = Field(
+        default=True,
+        description="Активен ли шаблон",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата создания шаблона",
+    )
