@@ -88,6 +88,34 @@ class User(BaseModel):
         default=0,
         description="Баланс CD токенов",
     )
+    #
+    is_banned: bool = Field(
+        default=False,
+        description="Забанен ли пользователь",
+    )
+    #
+    # Бонусы
+    last_daily_bonus_date: Optional[dt.date] = Field(
+        None,
+        description="Дата последнего получения ежедневного бонуса",
+    )
+    referral_code: Optional[str] = Field(
+        None,
+        description="Реферальный код пользователя",
+    )
+    referred_by: Optional[int] = Field(
+        None,
+        description="Telegram user_id пользователя, который пригласил",
+    )
+    referrals_count: int = Field(
+        default=0,
+        description="Количество приглашенных друзей",
+    )
+    # Задания
+    quests_completed: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Словарь выполненных заданий: {quest_id: completed}",
+    )
 
 
 class Team(BaseModel):

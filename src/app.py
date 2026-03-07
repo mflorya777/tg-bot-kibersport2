@@ -97,6 +97,21 @@ async def register_handlers(
             await tournament_create_message_handler(message)
             return
         
+        # Проверяем состояние поиска пользователя в админ-панели
+        from src.modules.handlers import _waiting_user_search, _waiting_token_amount
+        if _waiting_user_search.get(user_id, False):
+            print(f"[DEBUG] >>> Вызываем admin_user_search_message_handler для пользователя {user_id}")
+            from src.modules.handlers import admin_user_search_message_handler
+            await admin_user_search_message_handler(message)
+            return
+        
+        # Проверяем состояние ожидания суммы токенов
+        if user_id in _waiting_token_amount:
+            print(f"[DEBUG] >>> Вызываем admin_token_amount_message_handler для пользователя {user_id}")
+            from src.modules.handlers import admin_token_amount_message_handler
+            await admin_token_amount_message_handler(message)
+            return
+        
         # Если ни одно состояние не активно, ничего не делаем
         print(f"[DEBUG] >>> unified_message_handler: нет активных состояний для пользователя {user_id}")
     
@@ -132,6 +147,7 @@ async def register_handlers(
         | F.data.startswith("support_")
         | F.data.startswith("faq_")
         | F.data.startswith("wallet_")
+        | F.data.startswith("bonus_")
         | (F.data.startswith("tournament_") & ~F.data.startswith("tournament_create_") & ~F.data.startswith("tournament_join_") & ~F.data.startswith("tournament_confirm_")),
     )
     dp.callback_query.register(

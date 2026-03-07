@@ -14,6 +14,7 @@ from src.models.mongo_models import (
     Transaction,
     TransactionType,
 )
+from src.models.user_roles import UserRole
 
 
 _LOG = logging.getLogger("woman-tg-bot")
@@ -304,6 +305,56 @@ class MongoClient:
                 f"Ошибка при получении турниров из MongoDB: {e}",
             )
             return []
+    
+    async def update_user_daily_bonus_date(
+        self,
+        user_id: int,
+        date: dt.date,
+    ) -> None:
+        """
+        Обновляет дату последнего получения ежедневного бонуса.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            date: Дата получения бонуса
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "last_daily_bonus_date": date,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлена дата ежедневного бонуса для пользователя {user_id}: {date}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении даты ежедневного бонуса для пользователя {user_id}: {e}")
+            raise
+    
+    async def update_user_referral_code(
+        self,
+        user_id: int,
+        referral_code: str,
+    ) -> None:
+        """
+        Обновляет реферальный код пользователя.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            referral_code: Реферальный код
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "referral_code": referral_code,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлен реферальный код для пользователя {user_id}: {referral_code}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении реферального кода для пользователя {user_id}: {e}")
+            raise
 
     async def update_tournament(
         self,
@@ -398,6 +449,56 @@ class MongoClient:
                 f"Ошибка при получении рейтинга игроков: {e}",
             )
             return []
+    
+    async def update_user_daily_bonus_date(
+        self,
+        user_id: int,
+        date: dt.date,
+    ) -> None:
+        """
+        Обновляет дату последнего получения ежедневного бонуса.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            date: Дата получения бонуса
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "last_daily_bonus_date": date,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлена дата ежедневного бонуса для пользователя {user_id}: {date}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении даты ежедневного бонуса для пользователя {user_id}: {e}")
+            raise
+    
+    async def update_user_referral_code(
+        self,
+        user_id: int,
+        referral_code: str,
+    ) -> None:
+        """
+        Обновляет реферальный код пользователя.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            referral_code: Реферальный код
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "referral_code": referral_code,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлен реферальный код для пользователя {user_id}: {referral_code}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении реферального кода для пользователя {user_id}: {e}")
+            raise
 
     async def get_teams_rating(
         self,
@@ -443,6 +544,56 @@ class MongoClient:
                 f"Ошибка при получении рейтинга команд: {e}",
             )
             return []
+    
+    async def update_user_daily_bonus_date(
+        self,
+        user_id: int,
+        date: dt.date,
+    ) -> None:
+        """
+        Обновляет дату последнего получения ежедневного бонуса.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            date: Дата получения бонуса
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "last_daily_bonus_date": date,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлена дата ежедневного бонуса для пользователя {user_id}: {date}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении даты ежедневного бонуса для пользователя {user_id}: {e}")
+            raise
+    
+    async def update_user_referral_code(
+        self,
+        user_id: int,
+        referral_code: str,
+    ) -> None:
+        """
+        Обновляет реферальный код пользователя.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            referral_code: Реферальный код
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "referral_code": referral_code,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлен реферальный код для пользователя {user_id}: {referral_code}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении реферального кода для пользователя {user_id}: {e}")
+            raise
 
     async def get_user_rating_position(
         self,
@@ -635,3 +786,137 @@ class MongoClient:
                 f"Ошибка при получении транзакций пользователя {user_id}: {e}",
             )
             return []
+    
+    async def update_user_daily_bonus_date(
+        self,
+        user_id: int,
+        date: dt.date,
+    ) -> None:
+        """
+        Обновляет дату последнего получения ежедневного бонуса.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            date: Дата получения бонуса
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "last_daily_bonus_date": date,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлена дата ежедневного бонуса для пользователя {user_id}: {date}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении даты ежедневного бонуса для пользователя {user_id}: {e}")
+            raise
+    
+    async def update_user_referral_code(
+        self,
+        user_id: int,
+        referral_code: str,
+    ) -> None:
+        """
+        Обновляет реферальный код пользователя.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            referral_code: Реферальный код
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "referral_code": referral_code,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлен реферальный код для пользователя {user_id}: {referral_code}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении реферального кода для пользователя {user_id}: {e}")
+            raise
+
+
+    async def find_user_by_username_or_nickname(
+        self,
+        query: str,
+    ) -> Optional[User]:
+        """
+        Ищет пользователя по username или nickname.
+        
+        Args:
+            query: Поисковый запрос (username или nickname)
+        
+        Returns:
+            Найденный пользователь или None
+        """
+        try:
+            # Ищем по username (без @)
+            doc = await self.users_collection.find_one(
+                {"username": query}
+            )
+            if doc:
+                return User(**doc)
+            
+            # Ищем по nickname
+            doc = await self.users_collection.find_one(
+                {"nickname": query}
+            )
+            if doc:
+                return User(**doc)
+            
+            return None
+        except Exception as e:
+            _LOG.error(f"Ошибка при поиске пользователя по запросу '{query}': {e}")
+            return None
+    
+    async def update_user_ban_status(
+        self,
+        user_id: int,
+        is_banned: bool,
+    ) -> None:
+        """
+        Обновляет статус бана пользователя.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            is_banned: Забанен ли пользователь
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "is_banned": is_banned,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлен статус бана для пользователя {user_id}: {is_banned}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении статуса бана для пользователя {user_id}: {e}")
+            raise
+    
+    async def update_user_role(
+        self,
+        user_id: int,
+        role: UserRole,
+    ) -> None:
+        """
+        Обновляет роль пользователя.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            role: Новая роль пользователя
+        """
+        try:
+            await self.users_collection.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "role": role.value,
+                    "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                }},
+            )
+            _LOG.info(f"Обновлена роль пользователя {user_id}: {role.value}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении роли пользователя {user_id}: {e}")
+            raise

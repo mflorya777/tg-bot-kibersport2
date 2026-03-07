@@ -934,3 +934,193 @@ def get_wallet_keyboard() -> InlineKeyboardMarkup:
         ],
     )
     return keyboard
+
+
+def get_bonuses_keyboard(
+    daily_bonus_available: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для экрана бонусов.
+    
+    Args:
+        daily_bonus_available: Доступен ли ежедневный бонус
+    """
+    keyboard_rows = []
+    
+    # Ежедневный бонус
+    if daily_bonus_available:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="🎁 Забрать ежедневный бонус",
+                callback_data="bonus_daily_claim",
+            ),
+        ])
+    else:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="⏰ Ежедневный бонус (уже получен)",
+                callback_data="bonus_daily_info",
+            ),
+        ])
+    
+    # Реферальный бонус
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="👥 Бонус за приглашение друга",
+            callback_data="bonus_referral",
+        ),
+    ])
+    
+    # Задания
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="📋 Задания",
+            callback_data="bonus_quests",
+        ),
+    ])
+    
+    # Назад
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="menu_back",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_users_search_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для поиска пользователей в админ-панели.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_user_card_keyboard(
+    user_id: int,
+    is_super_admin: bool = False,
+    is_banned: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для карточки пользователя в админ-панели.
+    
+    Args:
+        user_id: Telegram user_id пользователя
+        is_super_admin: Является ли текущий пользователь супер-админом
+        is_banned: Забанен ли пользователь
+    """
+    keyboard_rows = [
+        [
+            InlineKeyboardButton(
+                text="➕ Начислить CD токен",
+                callback_data=f"admin_user_add_tokens_{user_id}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="➖ Списать CD токен",
+                callback_data=f"admin_user_remove_tokens_{user_id}",
+            ),
+        ],
+    ]
+    
+    # Кнопка бана/разбана
+    if is_banned:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="✅ Снять ограничение",
+                callback_data=f"admin_user_unban_{user_id}",
+            ),
+        ])
+    else:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="🚫 Ограничить доступ (бан)",
+                callback_data=f"admin_user_ban_{user_id}",
+            ),
+        ])
+    
+    # Только супер-админ может назначать роли
+    if is_super_admin:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="🎭 Назначить роль",
+                callback_data=f"admin_user_role_{user_id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_users",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_user_role_keyboard(
+    user_id: int,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора роли пользователя.
+    
+    Args:
+        user_id: Telegram user_id пользователя
+    """
+    from src.models.user_roles import UserRole
+    
+    keyboard_rows = [
+        [
+            InlineKeyboardButton(
+                text="👤 Пользователь",
+                callback_data=f"admin_user_set_role_{user_id}_USER",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="👔 Менеджер",
+                callback_data=f"admin_user_set_role_{user_id}_MANAGER",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🛡️ Админ",
+                callback_data=f"admin_user_set_role_{user_id}_ADMIN",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="👑 Супер-админ",
+                callback_data=f"admin_user_set_role_{user_id}_SUPER_ADMIN",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data=f"admin_user_card_{user_id}",
+            ),
+        ],
+    ]
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard

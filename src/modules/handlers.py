@@ -28,6 +28,10 @@ from src.modules.keyboards import (
     get_support_keyboard,
     get_faq_keyboard,
     get_wallet_keyboard,
+    get_bonuses_keyboard,
+    get_admin_users_search_keyboard,
+    get_admin_user_card_keyboard,
+    get_admin_user_role_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -60,6 +64,12 @@ _waiting_support_question: dict[int, bool] = {}
 
 # Словарь для хранения состояния ожидания промокода
 _waiting_promocode: dict[int, bool] = {}
+
+# Словарь для хранения состояния поиска пользователя в админ-панели
+_waiting_user_search: dict[int, bool] = {}
+
+# Словарь для хранения состояния ожидания суммы токенов для начисления/списания
+_waiting_token_amount: dict[int, dict] = {}
 
 
 def generate_team_id() -> str:
@@ -365,6 +375,171 @@ def format_teams_rating(
             lines.append(
                 f"\n👉 {team_position}. {team_name} | {points} | {tournaments}",
             )
+    
+    return "\n".join(lines)
+
+
+def format_bonuses_text(
+    daily_bonus_available: bool = False,
+    referrals_count: int = 0,
+    referral_code: Optional[str] = None,
+) -> str:
+    """
+    Форматирует текст для экрана бонусов.
+    
+    Args:
+        daily_bonus_available: Доступен ли ежедневный бонус
+        referrals_count: Количество приглашенных друзей
+        referral_code: Реферальный код пользователя
+    
+    Returns:
+        Отформатированный текст бонусов
+    """
+    lines = ["🎁 Бонусы\n"]
+    
+    # Ежедневный бонус
+    lines.append("📅 Ежедневный бонус:")
+    if daily_bonus_available:
+        lines.append("  ✅ Доступен! Нажмите кнопку, чтобы забрать.")
+    else:
+        lines.append("  ⏰ Уже получен сегодня. Завтра будет доступен снова.")
+    
+    lines.append("")
+    
+    # Реферальный бонус
+    lines.append("👥 Бонус за приглашение друга:")
+    if referral_code:
+        lines.append(f"  🔗 Ваш реферальный код: <code>{referral_code}</code>")
+    else:
+        lines.append("  🔗 Реферальный код будет создан при первом использовании")
+    lines.append(f"  👥 Приглашено друзей: <b>{referrals_count}</b>")
+    lines.append("  💰 За каждого друга: +50 CD токенов")
+    
+    lines.append("")
+    
+    # Задания
+    lines.append("📋 Задания:")
+    lines.append("  • Сыграй турнир")
+    lines.append("  • Будь в команде")
+    lines.append("  • Пригласи друга")
+    
+    return "\n".join(lines)
+
+
+def format_admin_user_card_text(
+    user: User,
+    team: Optional[Team] = None,
+) -> str:
+    """
+    Форматирует текст карточки пользователя для админ-панели.
+    
+    Args:
+        user: Объект пользователя
+        team: Объект команды (если пользователь в команде)
+    
+    Returns:
+        Отформатированный текст карточки пользователя
+    """
+    lines = [f"👤 Карточка пользователя\n"]
+    
+    # Профиль
+    lines.append("📋 Профиль:")
+    lines.append(f"  🆔 ID: <code>{user.id}</code>")
+    if user.username:
+        lines.append(f"  📱 Username: @{user.username}")
+    if user.nickname:
+        lines.append(f"  🎮 Никнейм: {user.nickname}")
+    if user.name:
+        full_name = user.name
+        if user.surname:
+            full_name += f" {user.surname}"
+        lines.append(f"  👤 Имя: {full_name}")
+    if user.game_discipline:
+        lines.append(f"  🎯 Игра: {user.game_discipline}")
+    if user.region_country:
+        lines.append(f"  🌍 Регион: {user.region_country}")
+    lines.append(f"  🎭 Роль: {user.role.value}")
+    if user.is_banned:
+        lines.append("  🚫 Статус: <b>Забанен</b>")
+    else:
+        lines.append("  ✅ Статус: Активен")
+    
+    lines.append("")
+    
+    # Команда
+    lines.append("👥 Команда:")
+    if team:
+        lines.append(f"  📛 Название: {team.name} ({team.tag})")
+        lines.append(f"  👑 Капитан: {'Вы' if team.captain_id == user.id else 'Другой'}")
+    else:
+        lines.append("  ❌ Не состоит в команде")
+    
+    lines.append("")
+    
+    # Статистика
+    lines.append("📊 Статистика:")
+    lines.append(f"  🏆 Турниров сыграно: {user.tournaments_played}")
+    lines.append(f"  💀 Всего киллов: {user.total_kills}")
+    if user.rating_position:
+        lines.append(f"  📈 Место в рейтинге: #{user.rating_position}")
+    else:
+        lines.append("  📈 Место в рейтинге: не определено")
+    
+    lines.append("")
+    
+    # Баланс
+    lines.append("💰 Баланс CD токенов:")
+    lines.append(f"  💵 Текущий баланс: <b>{user.balance} CD токенов</b>")
+    
+    return "\n".join(lines)
+
+
+def format_quests_text(
+    user: User,
+) -> str:
+    """
+    Форматирует текст для экрана заданий.
+    
+    Args:
+        user: Объект пользователя
+    
+    Returns:
+        Отформатированный текст заданий
+    """
+    lines = ["📋 Задания\n"]
+    
+    # Проверяем прогресс по заданиям
+    quests = {
+        "play_tournament": {
+            "name": "Сыграй турнир",
+            "description": "Прими участие в любом турнире",
+            "reward": "100 CD токенов",
+            "completed": user.quests_completed.get("play_tournament", False),
+            "progress": f"{user.tournaments_played} / 1",
+        },
+        "join_team": {
+            "name": "Будь в команде",
+            "description": "Вступи в любую команду",
+            "reward": "50 CD токенов",
+            "completed": user.quests_completed.get("join_team", False),
+            "progress": "✅" if user.team_id else "❌",
+        },
+        "invite_friend": {
+            "name": "Пригласи друга",
+            "description": "Пригласи друга по реферальной ссылке",
+            "reward": "50 CD токенов",
+            "completed": user.quests_completed.get("invite_friend", False),
+            "progress": f"{user.referrals_count} / 1",
+        },
+    }
+    
+    for quest_id, quest in quests.items():
+        status = "✅" if quest["completed"] else "⏳"
+        lines.append(f"{status} <b>{quest['name']}</b>")
+        lines.append(f"   {quest['description']}")
+        lines.append(f"   Прогресс: {quest['progress']}")
+        lines.append(f"   Награда: {quest['reward']}")
+        lines.append("")
     
     return "\n".join(lines)
 
@@ -782,11 +957,41 @@ async def callback_handler(
         )
     elif callback_data == "menu_bonuses":
         await callback.answer("Бонусы")
+        # Получаем информацию о бонусах пользователя
+        daily_bonus_available = False
+        if _mongo_client is not None:
+            try:
+                user = await _mongo_client.get_user(callback.from_user.id)
+                if user:
+                    # Проверяем, доступен ли ежедневный бонус
+                    today = dt.date.today()
+                    if not user.last_daily_bonus_date or user.last_daily_bonus_date < today:
+                        daily_bonus_available = True
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении информации о бонусах: {e}")
+        
+        bonuses_text = format_bonuses_text(
+            daily_bonus_available=daily_bonus_available,
+            referrals_count=0,
+        )
+        if _mongo_client is not None:
+            try:
+                user = await _mongo_client.get_user(callback.from_user.id)
+                if user:
+                    bonuses_text = format_bonuses_text(
+                        daily_bonus_available=daily_bonus_available,
+                        referrals_count=user.referrals_count,
+                        referral_code=user.referral_code,
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении информации о рефералах: {e}")
+        
         await callback.message.edit_text(
-            text="🎁 Бонусы\n\nРаздел в разработке...",
-            reply_markup=get_main_menu_keyboard(
-                show_admin=show_admin,
+            text=bonuses_text,
+            reply_markup=get_bonuses_keyboard(
+                daily_bonus_available=daily_bonus_available,
             ),
+            parse_mode="HTML",
         )
     elif callback_data == "menu_wallet":
         await callback.answer("Кошелёк")
@@ -858,6 +1063,124 @@ async def callback_handler(
                 show_admin=show_admin,
             ),
         )
+    elif callback_data == "bonus_daily_claim":
+        await callback.answer("Ежедневный бонус")
+        # Выдаем ежедневный бонус
+        if _mongo_client is not None:
+            try:
+                user = await _mongo_client.get_user(callback.from_user.id)
+                if user:
+                    today = dt.date.today()
+                    # Проверяем, доступен ли бонус
+                    if user.last_daily_bonus_date and user.last_daily_bonus_date >= today:
+                        await callback.answer("Вы уже получили ежедневный бонус сегодня!", show_alert=True)
+                        return
+                    
+                    # Выдаем бонус (50 CD токенов)
+                    bonus_amount = 50
+                    await _mongo_client.add_transaction(
+                        user_id=callback.from_user.id,
+                        transaction_type=TransactionType.DEPOSIT,
+                        amount=bonus_amount,
+                        description="Ежедневный бонус",
+                    )
+                    
+                    # Обновляем дату последнего бонуса
+                    await _mongo_client.update_user_daily_bonus_date(
+                        user_id=callback.from_user.id,
+                        date=today,
+                    )
+                    
+                    new_balance = await _mongo_client.get_user_balance(callback.from_user.id)
+                    
+                    await callback.message.edit_text(
+                        text=f"✅ Ежедневный бонус получен!\n\n"
+                             f"💰 Начислено: {bonus_amount} CD токенов\n"
+                             f"💵 Новый баланс: {new_balance} CD токенов\n\n"
+                             f"Приходите завтра за новым бонусом!",
+                        reply_markup=get_bonuses_keyboard(daily_bonus_available=False),
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при выдаче ежедневного бонуса: {e}")
+                await callback.answer("Произошла ошибка. Попробуйте позже.", show_alert=True)
+        else:
+            await callback.answer("Ошибка подключения к базе данных.", show_alert=True)
+    elif callback_data == "bonus_daily_info":
+        await callback.answer("Ежедневный бонус")
+        await callback.message.edit_text(
+            text="⏰ Ежедневный бонус\n\n"
+                 "Вы уже получили ежедневный бонус сегодня.\n\n"
+                 "Приходите завтра за новым бонусом!",
+            reply_markup=get_bonuses_keyboard(daily_bonus_available=False),
+        )
+    elif callback_data == "bonus_referral":
+        await callback.answer("Реферальный бонус")
+        # Показываем информацию о реферальном бонусе
+        referrals_count = 0
+        referral_code = None
+        
+        if _mongo_client is not None:
+            try:
+                user = await _mongo_client.get_user(callback.from_user.id)
+                if user:
+                    referrals_count = user.referrals_count
+                    referral_code = user.referral_code
+                    
+                    # Если реферального кода нет, создаем его
+                    if not referral_code:
+                        import secrets
+                        referral_code = f"REF{secrets.token_hex(4).upper()}"
+                        await _mongo_client.update_user_referral_code(
+                            user_id=callback.from_user.id,
+                            referral_code=referral_code,
+                        )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении информации о рефералах: {e}")
+        
+        referral_text = (
+            f"👥 Бонус за приглашение друга\n\n"
+            f"🔗 Ваш реферальный код: <code>{referral_code or 'не создан'}</code>\n\n"
+            f"📊 Статистика:\n"
+            f"  👥 Приглашено друзей: <b>{referrals_count}</b>\n"
+            f"  💰 Заработано: <b>{referrals_count * 50} CD токенов</b>\n\n"
+            f"💡 Как это работает:\n"
+            f"  1. Поделитесь своим реферальным кодом с друзьями\n"
+            f"  2. Когда друг зарегистрируется по вашему коду, вы получите 50 CD токенов\n"
+            f"  3. Ваш друг также получит 50 CD токенов за регистрацию\n\n"
+            f"📱 Ваша реферальная ссылка:\n"
+            f"  <code>https://t.me/testtt_crm_bot?start={referral_code or 'REF'}</code>"
+        )
+        
+        await callback.message.edit_text(
+            text=referral_text,
+            reply_markup=get_bonuses_keyboard(daily_bonus_available=False),
+            parse_mode="HTML",
+        )
+    elif callback_data == "bonus_quests":
+        await callback.answer("Задания")
+        # Показываем список заданий
+        if _mongo_client is not None:
+            try:
+                user = await _mongo_client.get_user(callback.from_user.id)
+                if user:
+                    # Проверяем прогресс по заданиям
+                    quests_text = format_quests_text(user)
+                    await callback.message.edit_text(
+                        text=quests_text,
+                        reply_markup=get_bonuses_keyboard(daily_bonus_available=False),
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении заданий: {e}")
+                await callback.message.edit_text(
+                    text="📋 Задания\n\nПроизошла ошибка при загрузке заданий.",
+                    reply_markup=get_bonuses_keyboard(daily_bonus_available=False),
+                )
+        else:
+            await callback.message.edit_text(
+                text="📋 Задания\n\nОшибка подключения к базе данных.",
+                reply_markup=get_bonuses_keyboard(daily_bonus_available=False),
+            )
     elif callback_data == "menu_invite":
         await callback.answer("Пригласи друга")
         await callback.message.edit_text(
@@ -1633,14 +1956,27 @@ async def admin_callback_handler(
                 is_super_admin=is_super_admin,
             ),
         )
-    elif callback_data == "admin_users":
-        await callback.answer("Пользователи")
+    elif callback_data == "admin_back":
+        await callback.answer("Админ-панель")
         await callback.message.edit_text(
-            text="👥 Пользователи\n\nРаздел в разработке...",
+            text="⚙️ Админ-панель",
             reply_markup=get_admin_panel_keyboard(
                 is_super_admin=is_super_admin,
             ),
         )
+    elif callback_data == "admin_users":
+        await callback.answer("Пользователи")
+        await callback.message.edit_text(
+            text="👥 Пользователи\n\n"
+                 "Введите никнейм или ID пользователя для поиска.\n\n"
+                 "Примеры:\n"
+                 "  • @username\n"
+                 "  • 123456789\n"
+                 "  • nickname",
+            reply_markup=get_admin_users_search_keyboard(),
+        )
+        # Активируем режим поиска пользователя
+        _waiting_user_search[callback.from_user.id] = True
     elif callback_data == "admin_teams":
         await callback.answer("Команды")
         await callback.message.edit_text(
@@ -1649,6 +1985,167 @@ async def admin_callback_handler(
                 is_super_admin=is_super_admin,
             ),
         )
+    elif callback_data.startswith("admin_user_card_"):
+        # Показываем карточку пользователя
+        target_user_id = int(callback_data.replace("admin_user_card_", ""))
+        await callback.answer("Карточка пользователя")
+        
+        if _mongo_client is not None:
+            try:
+                target_user = await _mongo_client.get_user(target_user_id)
+                if not target_user:
+                    await callback.answer("Пользователь не найден", show_alert=True)
+                    return
+                
+                team = None
+                if target_user.team_id:
+                    team = await _mongo_client.get_team(target_user.team_id)
+                
+                user_card_text = format_admin_user_card_text(target_user, team)
+                
+                await callback.message.edit_text(
+                    text=user_card_text,
+                    reply_markup=get_admin_user_card_keyboard(
+                        user_id=target_user_id,
+                        is_super_admin=is_super_admin,
+                        is_banned=target_user.is_banned,
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении карточки пользователя: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_user_add_tokens_"):
+        # Начисление токенов
+        target_user_id = int(callback_data.replace("admin_user_add_tokens_", ""))
+        await callback.answer("Начислить CD токен")
+        await callback.message.edit_text(
+            text=f"➕ Начислить CD токен\n\n"
+                 f"Введите сумму для начисления пользователю (ID: {target_user_id}):\n\n"
+                 f"Или отправьте /cancel для отмены.",
+        )
+        # Активируем режим ожидания суммы
+        _waiting_token_amount[callback.from_user.id] = {
+            "action": "add",
+            "target_user_id": target_user_id,
+        }
+    elif callback_data.startswith("admin_user_remove_tokens_"):
+        # Списание токенов
+        target_user_id = int(callback_data.replace("admin_user_remove_tokens_", ""))
+        await callback.answer("Списать CD токен")
+        await callback.message.edit_text(
+            text=f"➖ Списать CD токен\n\n"
+                 f"Введите сумму для списания у пользователя (ID: {target_user_id}):\n\n"
+                 f"Или отправьте /cancel для отмены.",
+        )
+        # Активируем режим ожидания суммы
+        _waiting_token_amount[callback.from_user.id] = {
+            "action": "remove",
+            "target_user_id": target_user_id,
+        }
+    elif callback_data.startswith("admin_user_ban_"):
+        # Бан пользователя
+        target_user_id = int(callback_data.replace("admin_user_ban_", ""))
+        await callback.answer("Забанить пользователя")
+        
+        if _mongo_client is not None:
+            try:
+                await _mongo_client.update_user_ban_status(target_user_id, True)
+                target_user = await _mongo_client.get_user(target_user_id)
+                if target_user:
+                    team = None
+                    if target_user.team_id:
+                        team = await _mongo_client.get_team(target_user.team_id)
+                    user_card_text = format_admin_user_card_text(target_user, team)
+                    await callback.message.edit_text(
+                        text=user_card_text,
+                        reply_markup=get_admin_user_card_keyboard(
+                            user_id=target_user_id,
+                            is_super_admin=is_super_admin,
+                            is_banned=True,
+                        ),
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при бане пользователя: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_user_unban_"):
+        # Разбан пользователя
+        target_user_id = int(callback_data.replace("admin_user_unban_", ""))
+        await callback.answer("Снять ограничение")
+        
+        if _mongo_client is not None:
+            try:
+                await _mongo_client.update_user_ban_status(target_user_id, False)
+                target_user = await _mongo_client.get_user(target_user_id)
+                if target_user:
+                    team = None
+                    if target_user.team_id:
+                        team = await _mongo_client.get_team(target_user.team_id)
+                    user_card_text = format_admin_user_card_text(target_user, team)
+                    await callback.message.edit_text(
+                        text=user_card_text,
+                        reply_markup=get_admin_user_card_keyboard(
+                            user_id=target_user_id,
+                            is_super_admin=is_super_admin,
+                            is_banned=False,
+                        ),
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                _LOG.error(f"Ошибка при разбане пользователя: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
+    elif callback_data.startswith("admin_user_role_"):
+        # Выбор роли пользователя
+        target_user_id = int(callback_data.replace("admin_user_role_", ""))
+        await callback.answer("Назначить роль")
+        
+        if not is_super_admin:
+            await callback.answer("Только супер-админ может назначать роли", show_alert=True)
+            return
+        
+        await callback.message.edit_text(
+            text=f"🎭 Назначить роль\n\n"
+                 f"Выберите роль для пользователя (ID: {target_user_id}):",
+            reply_markup=get_admin_user_role_keyboard(target_user_id),
+        )
+    elif callback_data.startswith("admin_user_set_role_"):
+        # Установка роли пользователя
+        parts = callback_data.replace("admin_user_set_role_", "").split("_")
+        if len(parts) >= 2:
+            target_user_id = int(parts[0])
+            role_name = "_".join(parts[1:])
+            
+            if not is_super_admin:
+                await callback.answer("Только супер-админ может назначать роли", show_alert=True)
+                return
+            
+            try:
+                role = UserRole[role_name]
+                if _mongo_client is not None:
+                    await _mongo_client.update_user_role(target_user_id, role)
+                    target_user = await _mongo_client.get_user(target_user_id)
+                    if target_user:
+                        team = None
+                        if target_user.team_id:
+                            team = await _mongo_client.get_team(target_user.team_id)
+                        user_card_text = format_admin_user_card_text(target_user, team)
+                        await callback.message.edit_text(
+                            text=user_card_text,
+                            reply_markup=get_admin_user_card_keyboard(
+                                user_id=target_user_id,
+                                is_super_admin=is_super_admin,
+                                is_banned=target_user.is_banned,
+                            ),
+                            parse_mode="HTML",
+                        )
+                        await callback.answer(f"Роль изменена на {role.value}")
+            except (KeyError, ValueError) as e:
+                _LOG.error(f"Ошибка при установке роли: {e}")
+                await callback.answer("Неверная роль", show_alert=True)
+            except Exception as e:
+                _LOG.error(f"Ошибка при установке роли: {e}")
+                await callback.answer("Произошла ошибка", show_alert=True)
     elif callback_data == "admin_ratings":
         await callback.answer("Рейтинги")
         await callback.message.edit_text(
@@ -2562,6 +3059,187 @@ async def promocode_message_handler(
     
     # Сбрасываем флаг ожидания
     _waiting_promocode.pop(user_id, None)
+
+
+async def admin_user_search_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для поиска пользователей в админ-панели.
+    """
+    user_id = message.from_user.id
+    
+    # Проверяем, ожидает ли пользователь ввода поискового запроса
+    if not _waiting_user_search.get(user_id, False):
+        return
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_user_search.pop(user_id, None)
+        await message.answer(
+            "❌ Поиск отменён.",
+            reply_markup=get_admin_users_search_keyboard(),
+        )
+        return
+    
+    # Проверяем, что это текстовое сообщение
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с никнеймом или ID пользователя.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    search_query = message.text.strip()
+    
+    # Ищем пользователя
+    found_user = None
+    if _mongo_client is not None:
+        try:
+            # Пробуем найти по ID (если это число)
+            if search_query.isdigit():
+                found_user = await _mongo_client.get_user(int(search_query))
+            else:
+                # Ищем по username (убираем @ если есть)
+                username = search_query.lstrip("@")
+                # Ищем по nickname
+                found_user = await _mongo_client.find_user_by_username_or_nickname(username)
+        except Exception as e:
+            _LOG.error(f"Ошибка при поиске пользователя: {e}")
+    
+    if not found_user:
+        await message.answer(
+            f"❌ Пользователь не найден: <code>{search_query}</code>\n\n"
+            "Попробуйте другой запрос или отправьте /cancel для отмены.",
+            parse_mode="HTML",
+        )
+        return
+    
+    # Показываем карточку пользователя
+    team = None
+    if found_user.team_id and _mongo_client is not None:
+        try:
+            team = await _mongo_client.get_team(found_user.team_id)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении команды: {e}")
+    
+    user_card_text = format_admin_user_card_text(found_user, team)
+    
+    # Получаем роль текущего пользователя для проверки прав
+    current_user_role = await get_user_role(user_id)
+    is_super_admin = current_user_role == UserRole.SUPER_ADMIN
+    
+    await message.answer(
+        text=user_card_text,
+        reply_markup=get_admin_user_card_keyboard(
+            user_id=found_user.id,
+            is_super_admin=is_super_admin,
+            is_banned=found_user.is_banned,
+        ),
+        parse_mode="HTML",
+    )
+    
+    # Сбрасываем флаг ожидания
+    _waiting_user_search.pop(user_id, None)
+
+
+async def admin_token_amount_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для ввода суммы токенов для начисления/списания.
+    """
+    user_id = message.from_user.id
+    
+    # Проверяем, ожидает ли пользователь ввода суммы
+    if user_id not in _waiting_token_amount:
+        return
+    
+    token_data = _waiting_token_amount[user_id]
+    action = token_data["action"]
+    target_user_id = token_data["target_user_id"]
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_token_amount.pop(user_id, None)
+        await message.answer(
+            "❌ Операция отменена.",
+            reply_markup=get_admin_users_search_keyboard(),
+        )
+        return
+    
+    # Проверяем, что это текстовое сообщение
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с суммой.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    try:
+        amount = int(message.text.strip())
+        if amount <= 0:
+            await message.answer(
+                "❌ Сумма должна быть положительным числом.\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+            return
+        
+        if _mongo_client is not None:
+            # Выполняем операцию
+            transaction_type = TransactionType.DEPOSIT if action == "add" else TransactionType.DEBIT
+            description = f"Админ: {'начисление' if action == 'add' else 'списание'} токенов"
+            
+            await _mongo_client.add_transaction(
+                user_id=target_user_id,
+                transaction_type=transaction_type,
+                amount=amount,
+                description=description,
+            )
+            
+            new_balance = await _mongo_client.get_user_balance(target_user_id)
+            action_text = "начислено" if action == "add" else "списано"
+            
+            await message.answer(
+                f"✅ {action_text.capitalize()} {amount} CD токенов пользователю (ID: {target_user_id})\n\n"
+                f"💵 Новый баланс: {new_balance} CD токенов",
+            )
+            
+            # Показываем обновленную карточку пользователя
+            target_user = await _mongo_client.get_user(target_user_id)
+            if target_user:
+                team = None
+                if target_user.team_id:
+                    team = await _mongo_client.get_team(target_user.team_id)
+                user_card_text = format_admin_user_card_text(target_user, team)
+                
+                # Получаем роль текущего пользователя
+                current_user_role = await get_user_role(user_id)
+                is_super_admin = current_user_role == UserRole.SUPER_ADMIN
+                
+                await message.answer(
+                    text=user_card_text,
+                    reply_markup=get_admin_user_card_keyboard(
+                        user_id=target_user_id,
+                        is_super_admin=is_super_admin,
+                        is_banned=target_user.is_banned,
+                    ),
+                    parse_mode="HTML",
+                )
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат суммы. Введите число.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    except Exception as e:
+        _LOG.error(f"Ошибка при обработке суммы токенов: {e}")
+        await message.answer(
+            "❌ Произошла ошибка. Попробуйте позже.",
+        )
+    
+    # Сбрасываем флаг ожидания
+    _waiting_token_amount.pop(user_id, None)
 
 
 async def tournament_create_message_handler(
