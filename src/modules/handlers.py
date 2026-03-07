@@ -440,25 +440,9 @@ async def callback_handler(
     show_admin = has_admin_access(user_role)
 
     if callback_data == "menu_profile":
-        await callback.answer("Профиль")
-        
-        # Получаем данные пользователя из БД
-        user = None
-        if _mongo_client is not None:
-            try:
-                user = await _mongo_client.get_user(callback.from_user.id)
-            except Exception as e:
-                _LOG.error(
-                    f"Ошибка при получении профиля пользователя {callback.from_user.id}: {e}",
-                )
-        
-        # Формируем текст профиля
-        profile_text = format_profile_text(user, callback.from_user)
-        
-        await callback.message.edit_text(
-            text=profile_text,
-            reply_markup=get_profile_keyboard(),
-        )
+        # Кнопка "Профиль" теперь открывает мини-приложение
+        # Этот обработчик оставлен на случай, если callback все еще приходит
+        await callback.answer("Профиль открывается в мини-приложении")
     elif callback_data == "menu_team":
         await callback.answer("Команда")
         

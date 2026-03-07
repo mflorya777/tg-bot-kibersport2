@@ -1,7 +1,8 @@
 from typing import Optional
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 from src.models.mongo_models import Team, Tournament
+from src.config import MINI_APP_URL
 
 
 def get_main_menu_keyboard(
@@ -17,7 +18,7 @@ def get_main_menu_keyboard(
         [
             InlineKeyboardButton(
                 text="🧑 Профиль",
-                callback_data="menu_profile",
+                web_app=WebAppInfo(url=MINI_APP_URL),
             ),
             InlineKeyboardButton(
                 text="👥 Команда",

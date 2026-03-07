@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv("local.env")
 
 TOKEN = getenv("BOT_TOKEN")
+MINI_APP_URL = getenv("MINI_APP_URL", "https://your-mini-app-domain.com/profile")
 
 
 class MongoConfig(BaseSettings):
