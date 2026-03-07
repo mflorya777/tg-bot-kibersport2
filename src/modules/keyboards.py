@@ -1781,3 +1781,110 @@ def get_giveaway_participation_type_keyboard() -> InlineKeyboardMarkup:
         ],
     )
     return keyboard
+
+
+def get_admin_broadcast_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для админ-панели рассылки.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📢 Всем пользователям",
+                    callback_data="admin_broadcast_all",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏆 Участникам турнира",
+                    callback_data="admin_broadcast_tournament",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👥 Менеджерам/Админам",
+                    callback_data="admin_broadcast_staff",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="admin_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_admin_broadcast_tournaments_keyboard(
+    tournaments: list[Tournament],
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для выбора турнира при рассылке.
+    
+    Args:
+        tournaments: Список турниров
+    """
+    keyboard_rows = []
+    
+    for tournament in tournaments:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"🏆 {tournament.name}",
+                callback_data=f"admin_broadcast_tournament_{tournament.id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_broadcast",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_admin_broadcast_preview_keyboard(
+    broadcast_type: str,
+    tournament_id: Optional[str] = None,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для предпросмотра рассылки.
+    
+    Args:
+        broadcast_type: Тип рассылки (all, tournament, staff)
+        tournament_id: ID турнира (если тип - tournament)
+    """
+    keyboard_rows = []
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✅ Отправить",
+            callback_data=f"admin_broadcast_confirm_{broadcast_type}_{tournament_id or ''}",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="✏️ Изменить",
+            callback_data="admin_broadcast_edit",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="❌ Отмена",
+            callback_data="admin_broadcast",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard

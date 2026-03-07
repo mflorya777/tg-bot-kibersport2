@@ -144,10 +144,18 @@ async def register_handlers(
             return
         
         # Проверяем состояние создания розыгрыша
+        from src.modules.handlers import _waiting_broadcast_data
         if user_id in _waiting_giveaway_data:
             print(f"[DEBUG] >>> Вызываем admin_giveaway_message_handler для пользователя {user_id}")
             from src.modules.handlers import admin_giveaway_message_handler
             await admin_giveaway_message_handler(message)
+            return
+        
+        # Проверяем состояние создания рассылки
+        if user_id in _waiting_broadcast_data:
+            print(f"[DEBUG] >>> Вызываем admin_broadcast_message_handler для пользователя {user_id}")
+            from src.modules.handlers import admin_broadcast_message_handler
+            await admin_broadcast_message_handler(message)
             return
         
         # Если ни одно состояние не активно, ничего не делаем

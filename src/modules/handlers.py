@@ -52,6 +52,9 @@ from src.modules.keyboards import (
     get_admin_promotions_list_keyboard,
     get_admin_promotion_card_keyboard,
     get_giveaway_participation_type_keyboard,
+    get_admin_broadcast_keyboard,
+    get_admin_broadcast_tournaments_keyboard,
+    get_admin_broadcast_preview_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -107,6 +110,9 @@ _waiting_results_data: dict[int, dict] = {}
 
 # Словарь для хранения состояния создания розыгрыша
 _waiting_giveaway_data: dict[int, dict] = {}
+
+# Словарь для хранения состояния создания рассылки
+_waiting_broadcast_data: dict[int, dict] = {}
 
 # Словарь для хранения состояния ожидания суммы токенов для начисления/списания
 _waiting_token_amount: dict[int, dict] = {}
@@ -3129,11 +3135,172 @@ async def admin_callback_handler(
     elif callback_data == "admin_broadcast":
         await callback.answer("Рассылка")
         await callback.message.edit_text(
-            text="📣 Рассылка\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
-            ),
+            text="📣 Рассылка\n\n"
+                 "Выберите тип рассылки:",
+            reply_markup=get_admin_broadcast_keyboard(),
         )
+    elif callback_data == "admin_broadcast_all":
+        await callback.answer("Рассылка всем")
+        _waiting_broadcast_data[callback.from_user.id] = {
+            "type": "all",
+            "step": "message",
+        }
+        await callback.message.edit_text(
+            text="📢 Рассылка всем пользователям\n\n"
+                 "Введите текст сообщения для рассылки:\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+    elif callback_data == "admin_broadcast_tournament":
+        await callback.answer("Рассылка участникам турнира")
+        # Получаем список турниров
+        tournaments = []
+        if _mongo_client is not None:
+            try:
+                tournaments = await _mongo_client.get_tournaments()
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении турниров: {e}")
+        
+        await callback.message.edit_text(
+            text="🏆 Рассылка участникам турнира\n\n"
+                 "Выберите турнир:",
+            reply_markup=get_admin_broadcast_tournaments_keyboard(tournaments),
+        )
+    elif callback_data.startswith("admin_broadcast_tournament_"):
+        tournament_id = callback_data.replace("admin_broadcast_tournament_", "")
+        await callback.answer("Турнир выбран")
+        _waiting_broadcast_data[callback.from_user.id] = {
+            "type": "tournament",
+            "tournament_id": tournament_id,
+            "step": "message",
+        }
+        await callback.message.edit_text(
+            text="🏆 Рассылка участникам турнира\n\n"
+                 "Введите текст сообщения для рассылки:\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+    elif callback_data == "admin_broadcast_staff":
+        await callback.answer("Рассылка менеджерам/админам")
+        _waiting_broadcast_data[callback.from_user.id] = {
+            "type": "staff",
+            "step": "message",
+        }
+        await callback.message.edit_text(
+            text="👥 Рассылка менеджерам/админам\n\n"
+                 "Введите текст сообщения для рассылки:\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+    elif callback_data.startswith("admin_broadcast_confirm_"):
+        # Подтверждение рассылки
+        parts = callback_data.replace("admin_broadcast_confirm_", "").split("_")
+        broadcast_type = parts[0] if parts else "all"
+        tournament_id = parts[1] if len(parts) > 1 and parts[1] else None
+        
+        await callback.answer("Отправка рассылки...")
+        
+        user_id = callback.from_user.id
+        if user_id not in _waiting_broadcast_data:
+            await callback.answer("Данные рассылки не найдены", show_alert=True)
+            return
+        
+        data = _waiting_broadcast_data[user_id]
+        message_text = data.get("message_text", "")
+        
+        if not message_text:
+            await callback.answer("Текст сообщения не найден", show_alert=True)
+            return
+        
+        # Отправляем рассылку
+        sent_count = 0
+        failed_count = 0
+        
+        try:
+            if broadcast_type == "all":
+                # Отправляем всем пользователям
+                if _mongo_client is not None:
+                    users = await _mongo_client.get_all_users()
+                    for user in users:
+                        try:
+                            from aiogram import Bot
+                            bot = Bot.get_current()
+                            await bot.send_message(
+                                chat_id=user.id,
+                                text=message_text,
+                            )
+                            sent_count += 1
+                        except Exception as e:
+                            _LOG.error(f"Ошибка при отправке сообщения пользователю {user.id}: {e}")
+                            failed_count += 1
+            elif broadcast_type == "tournament":
+                # Отправляем участникам турнира
+                if _mongo_client is not None and tournament_id:
+                    tournament = await _mongo_client.get_tournament(tournament_id)
+                    if tournament:
+                        participants = []
+                        if tournament.format == TournamentFormat.SOLO:
+                            participants = tournament.solo_participants
+                        else:
+                            participants = tournament.team_participants
+                        
+                        for participant_id in participants:
+                            try:
+                                if tournament.format == TournamentFormat.SOLO:
+                                    await callback.bot.send_message(
+                                        chat_id=participant_id,
+                                        text=message_text,
+                                    )
+                                    sent_count += 1
+                                else:
+                                    # Для командных турниров отправляем капитану команды
+                                    team = await _mongo_client.get_team(participant_id)
+                                    if team and team.captain_id:
+                                        await callback.bot.send_message(
+                                            chat_id=team.captain_id,
+                                            text=message_text,
+                                        )
+                                        sent_count += 1
+                            except Exception as e:
+                                _LOG.error(f"Ошибка при отправке сообщения участнику {participant_id}: {e}")
+                                failed_count += 1
+            elif broadcast_type == "staff":
+                # Отправляем менеджерам и админам
+                if _mongo_client is not None:
+                    users = await _mongo_client.get_all_users()
+                    for user in users:
+                        if user.role in (UserRole.MANAGER, UserRole.ADMIN, UserRole.SUPER_ADMIN):
+                            try:
+                                await callback.bot.send_message(
+                                    chat_id=user.id,
+                                    text=message_text,
+                                )
+                                sent_count += 1
+                            except Exception as e:
+                                _LOG.error(f"Ошибка при отправке сообщения пользователю {user.id}: {e}")
+                                failed_count += 1
+            
+            # Очищаем данные рассылки
+            _waiting_broadcast_data.pop(user_id, None)
+            
+            await callback.message.edit_text(
+                text=f"✅ Рассылка завершена!\n\n"
+                     f"📤 Отправлено: {sent_count}\n"
+                     f"{f'❌ Ошибок: {failed_count}' if failed_count > 0 else ''}",
+                reply_markup=get_admin_broadcast_keyboard(),
+            )
+            await callback.answer(f"✅ Отправлено {sent_count} сообщений", show_alert=True)
+        except Exception as e:
+            _LOG.error(f"Ошибка при рассылке: {e}")
+            await callback.answer("❌ Произошла ошибка при рассылке", show_alert=True)
+    elif callback_data == "admin_broadcast_edit":
+        await callback.answer("Редактирование")
+        user_id = callback.from_user.id
+        if user_id in _waiting_broadcast_data:
+            data = _waiting_broadcast_data[user_id]
+            data["step"] = "message"
+            await callback.message.edit_text(
+                text="✏️ Редактирование сообщения\n\n"
+                     "Введите новый текст сообщения:\n\n"
+                     "Или отправьте /cancel для отмены.",
+            )
     elif callback_data == "admin_audit":
         # Дополнительная проверка: только супер-админ может видеть журнал действий
         if user_role != UserRole.SUPER_ADMIN:
@@ -4999,3 +5166,92 @@ async def admin_giveaway_message_handler(
                 except Exception as e:
                     _LOG.error(f"Ошибка при создании розыгрыша: {e}")
                     await message.answer("❌ Произошла ошибка при создании розыгрыша.")
+
+
+async def admin_broadcast_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для создания рассылки.
+    """
+    user_id = message.from_user.id
+    
+    if user_id not in _waiting_broadcast_data:
+        return
+    
+    data = _waiting_broadcast_data[user_id]
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_broadcast_data.pop(user_id, None)
+        await message.answer("❌ Создание рассылки отменено.")
+        return
+    
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    step = data.get("step", "message")
+    
+    if step == "message":
+        message_text = message.text.strip()
+        if not message_text:
+            await message.answer(
+                "❌ Текст сообщения не может быть пустым.\n\n"
+                "Или отправьте /cancel для отмены.",
+            )
+            return
+        
+        data["message_text"] = message_text
+        broadcast_type = data.get("type", "all")
+        tournament_id = data.get("tournament_id")
+        
+        # Формируем предпросмотр
+        preview_text = "📣 Предпросмотр рассылки\n\n"
+        
+        if broadcast_type == "all":
+            preview_text += "📢 Получатели: Все пользователи\n\n"
+        elif broadcast_type == "tournament":
+            if _mongo_client is not None and tournament_id:
+                tournament = await _mongo_client.get_tournament(tournament_id)
+                if tournament:
+                    preview_text += f"🏆 Получатели: Участники турнира '{tournament.name}'\n\n"
+        elif broadcast_type == "staff":
+            preview_text += "👥 Получатели: Менеджеры и Админы\n\n"
+        
+        preview_text += "─" * 30 + "\n\n"
+        preview_text += message_text
+        preview_text += "\n\n" + "─" * 30
+        
+        # Подсчитываем количество получателей
+        recipient_count = 0
+        if _mongo_client is not None:
+            try:
+                if broadcast_type == "all":
+                    users = await _mongo_client.get_all_users()
+                    recipient_count = len(users)
+                elif broadcast_type == "tournament" and tournament_id:
+                    tournament = await _mongo_client.get_tournament(tournament_id)
+                    if tournament:
+                        if tournament.format == TournamentFormat.SOLO:
+                            recipient_count = len(tournament.solo_participants)
+                        else:
+                            recipient_count = len(tournament.team_participants)
+                elif broadcast_type == "staff":
+                    users = await _mongo_client.get_all_users()
+                    recipient_count = sum(1 for u in users if u.role in (UserRole.MANAGER, UserRole.ADMIN, UserRole.SUPER_ADMIN))
+            except Exception as e:
+                _LOG.error(f"Ошибка при подсчете получателей: {e}")
+        
+        preview_text += f"\n\n📊 Получателей: {recipient_count}"
+        
+        await message.answer(
+            text=preview_text,
+            reply_markup=get_admin_broadcast_preview_keyboard(
+                broadcast_type=broadcast_type,
+                tournament_id=tournament_id,
+            ),
+        )

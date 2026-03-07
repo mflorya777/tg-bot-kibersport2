@@ -1977,3 +1977,27 @@ class MongoClient:
         except Exception as e:
             _LOG.error(f"Ошибка при определении победителей розыгрыша: {e}")
             raise
+
+    async def get_all_users(
+        self,
+    ) -> list[User]:
+        """
+        Получает список всех пользователей.
+        
+        Returns:
+            Список всех пользователей
+        """
+        try:
+            users = []
+            cursor = self.users_collection.find({})
+            async for doc in cursor:
+                if "id" in doc and isinstance(doc["id"], int):
+                    try:
+                        user = User(**doc)
+                        users.append(user)
+                    except Exception:
+                        continue
+            return users
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении всех пользователей: {e}")
+            return []
