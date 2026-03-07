@@ -83,6 +83,11 @@ class User(BaseModel):
         None,
         description="ID команды, в которой состоит пользователь",
     )
+    #
+    balance: int = Field(
+        default=0,
+        description="Баланс CD токенов",
+    )
 
 
 class Team(BaseModel):
@@ -229,4 +234,39 @@ class Tournament(BaseModel):
     updated_at: Optional[dt.datetime] = Field(
         None,
         description="Дата последнего обновления",
+    )
+
+
+class TransactionType(str, Enum):
+    """
+    Типы транзакций.
+    """
+    DEPOSIT = "deposit"  # Начисление
+    WITHDRAWAL = "withdrawal"  # Списание
+
+
+class Transaction(BaseModel):
+    id: str = Field(
+        ...,
+        description="Уникальный ID транзакции",
+    )
+    user_id: int = Field(
+        ...,
+        description="Telegram user_id пользователя",
+    )
+    transaction_type: TransactionType = Field(
+        ...,
+        description="Тип транзакции (начисление/списание)",
+    )
+    amount: int = Field(
+        ...,
+        description="Сумма транзакции (в CD токенах)",
+    )
+    description: str = Field(
+        ...,
+        description="Описание операции (за что)",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата и время транзакции",
     )

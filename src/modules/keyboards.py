@@ -899,3 +899,38 @@ def get_faq_keyboard() -> InlineKeyboardMarkup:
         ],
     )
     return keyboard
+
+
+def get_wallet_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для кошелька.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📜 История операций",
+                    callback_data="wallet_history",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎟 Потратить токены",
+                    callback_data="wallet_spend",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🧾 Ввести промокод",
+                    callback_data="wallet_promocode",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="menu_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard

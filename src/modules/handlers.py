@@ -27,6 +27,7 @@ from src.modules.keyboards import (
     get_ratings_tournament_select_keyboard,
     get_support_keyboard,
     get_faq_keyboard,
+    get_wallet_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -35,6 +36,8 @@ from src.models.mongo_models import (
     Tournament,
     TournamentStatus,
     TournamentFormat,
+    Transaction,
+    TransactionType,
     MOSCOW_TZ,
 )
 from src.clients.mongo import MongoClient
@@ -54,6 +57,9 @@ _tournament_creation_data: dict[int, dict] = {}
 
 # Словарь для хранения состояния ожидания вопроса в поддержке
 _waiting_support_question: dict[int, bool] = {}
+
+# Словарь для хранения состояния ожидания промокода
+_waiting_promocode: dict[int, bool] = {}
 
 
 def generate_team_id() -> str:
@@ -359,6 +365,66 @@ def format_teams_rating(
             lines.append(
                 f"\n👉 {team_position}. {team_name} | {points} | {tournaments}",
             )
+    
+    return "\n".join(lines)
+
+
+def format_wallet_text(
+    balance: int,
+) -> str:
+    """
+    Форматирует текст кошелька с балансом.
+    
+    Args:
+        balance: Баланс CD токенов
+    
+    Returns:
+        Отформатированный текст кошелька
+    """
+    lines = ["💰 Кошелёк (CD токен)\n"]
+    lines.append(f"💵 Баланс: <b>{balance} CD токенов</b>\n")
+    lines.append("📊 История (последние операции):")
+    lines.append("Начисление/списание/за что")
+    
+    return "\n".join(lines)
+
+
+def format_transactions_history(
+    transactions: list[Transaction],
+    balance: int,
+) -> str:
+    """
+    Форматирует историю транзакций.
+    
+    Args:
+        transactions: Список транзакций
+        balance: Текущий баланс
+    
+    Returns:
+        Отформатированный текст истории
+    """
+    lines = ["📜 История операций\n"]
+    lines.append(f"💵 Текущий баланс: <b>{balance} CD токенов</b>\n")
+    
+    if not transactions:
+        lines.append("История операций пуста")
+        return "\n".join(lines)
+    
+    lines.append("<b>Дата | Тип | Сумма | Описание</b>")
+    lines.append("─" * 40)
+    
+    for transaction in transactions[:10]:  # Показываем последние 10
+        date_str = transaction.created_at.strftime("%d.%m.%Y %H:%M")
+        type_emoji = "➕" if transaction.transaction_type == TransactionType.DEPOSIT else "➖"
+        type_text = "Начисление" if transaction.transaction_type == TransactionType.DEPOSIT else "Списание"
+        amount = transaction.amount
+        
+        lines.append(
+            f"{date_str} | {type_emoji} {type_text} | {amount} | {transaction.description}",
+        )
+    
+    if len(transactions) > 10:
+        lines.append(f"\n... и ещё {len(transactions) - 10} операций")
     
     return "\n".join(lines)
 
@@ -724,11 +790,65 @@ async def callback_handler(
         )
     elif callback_data == "menu_wallet":
         await callback.answer("Кошелёк")
+        # Получаем баланс пользователя
+        balance = 0
+        if _mongo_client is not None:
+            try:
+                balance = await _mongo_client.get_user_balance(callback.from_user.id)
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении баланса: {e}")
+        
+        wallet_text = format_wallet_text(balance)
         await callback.message.edit_text(
-            text="💰 Кошелёк (CD токен)\n\nРаздел в разработке...",
-            reply_markup=get_main_menu_keyboard(
-                show_admin=show_admin,
-            ),
+            text=wallet_text,
+            reply_markup=get_wallet_keyboard(),
+            parse_mode="HTML",
+        )
+    elif callback_data == "wallet_history":
+        await callback.answer("История операций")
+        # Получаем историю транзакций
+        transactions = []
+        balance = 0
+        if _mongo_client is not None:
+            try:
+                transactions = await _mongo_client.get_user_transactions(
+                    callback.from_user.id,
+                    limit=20,
+                )
+                balance = await _mongo_client.get_user_balance(callback.from_user.id)
+            except Exception as e:
+                _LOG.error(f"Ошибка при получении истории транзакций: {e}")
+        
+        history_text = format_transactions_history(transactions, balance)
+        await callback.message.edit_text(
+            text=history_text,
+            reply_markup=get_wallet_keyboard(),
+            parse_mode="HTML",
+        )
+    elif callback_data == "wallet_spend":
+        await callback.answer("Потратить токены")
+        await callback.message.edit_text(
+            text="🎟 Потратить токены\n\n"
+                 "Раздел в разработке...\n\n"
+                 "Здесь будет магазин и возможность участия в розыгрышах.",
+            reply_markup=get_wallet_keyboard(),
+        )
+    elif callback_data == "wallet_promocode":
+        await callback.answer("Ввести промокод")
+        # Активируем режим ожидания промокода
+        user_id = callback.from_user.id
+        _waiting_promocode[user_id] = True
+        _LOG.debug(f"Активирован режим ожидания промокода для пользователя {user_id}")
+        await callback.message.edit_text(
+            text="🧾 Ввести промокод\n\n"
+                 "Введите промокод для получения бонусов.\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+        # Также отправляем новое сообщение для ясности
+        await callback.message.answer(
+            "💬 Ожидаю промокод...\n\n"
+            "Введите промокод текстом.\n\n"
+            "Или отправьте /cancel для отмены.",
         )
     elif callback_data == "menu_promotions":
         await callback.answer("Акции и розыгрыши")
@@ -2332,6 +2452,91 @@ async def support_question_message_handler(
             reply_markup=get_support_keyboard(),
         )
         _waiting_support_question.pop(user_id, None)
+
+
+async def promocode_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для ввода промокода.
+    """
+    user_id = message.from_user.id
+    
+    # Проверяем, ожидает ли пользователь ввода промокода
+    if not _waiting_promocode.get(user_id, False):
+        _LOG.debug(f"Сообщение от пользователя {user_id} не обрабатывается промокодом (не в режиме ожидания)")
+        return
+    
+    _LOG.debug(f"Обработка промокода от пользователя {user_id}")
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_promocode.pop(user_id, None)
+        await message.answer(
+            "❌ Ввод промокода отменён.",
+            reply_markup=get_wallet_keyboard(),
+        )
+        return
+    
+    # Проверяем, что это текстовое сообщение
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с промокодом.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    promocode = message.text.strip().upper()
+    
+    # Проверяем промокод (пока тестовые промокоды)
+    valid_promocodes = {
+        "TEST100": 100,
+        "BONUS50": 50,
+        "WELCOME": 25,
+    }
+    
+    if promocode in valid_promocodes:
+        amount = valid_promocodes[promocode]
+        
+        # Добавляем транзакцию
+        if _mongo_client is not None:
+            try:
+                await _mongo_client.add_transaction(
+                    user_id=user_id,
+                    transaction_type=TransactionType.DEPOSIT,
+                    amount=amount,
+                    description=f"Промокод: {promocode}",
+                )
+                
+                new_balance = await _mongo_client.get_user_balance(user_id)
+                
+                await message.answer(
+                    f"✅ Промокод активирован!\n\n"
+                    f"💰 Начислено: {amount} CD токенов\n"
+                    f"💵 Новый баланс: {new_balance} CD токенов",
+                    reply_markup=get_wallet_keyboard(),
+                )
+            except Exception as e:
+                _LOG.error(f"Ошибка при активации промокода: {e}")
+                await message.answer(
+                    "❌ Произошла ошибка при активации промокода. Попробуйте позже.",
+                    reply_markup=get_wallet_keyboard(),
+                )
+        else:
+            await message.answer(
+                "❌ Ошибка подключения к базе данных.",
+                reply_markup=get_wallet_keyboard(),
+            )
+    else:
+        await message.answer(
+            f"❌ Промокод <b>{promocode}</b> не найден или уже использован.\n\n"
+            "Попробуйте другой промокод или отправьте /cancel для отмены.",
+            parse_mode="HTML",
+        )
+        return
+    
+    # Сбрасываем флаг ожидания
+    _waiting_promocode.pop(user_id, None)
 
 
 async def tournament_create_message_handler(

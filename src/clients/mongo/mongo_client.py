@@ -5,7 +5,15 @@ import datetime as dt
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from src.config import MongoConfig
-from src.models.mongo_models import User, Team, Tournament, TournamentStatus, TournamentFormat
+from src.models.mongo_models import (
+    User,
+    Team,
+    Tournament,
+    TournamentStatus,
+    TournamentFormat,
+    Transaction,
+    TransactionType,
+)
 
 
 _LOG = logging.getLogger("woman-tg-bot")
@@ -28,6 +36,7 @@ class MongoClient:
         self.users_collection = self.db[self.users_collection_name]
         self.teams_collection = self.db["teams"]
         self.tournaments_collection = self.db["tournaments"]
+        self.transactions_collection = self.db["transactions"]
 
     def get_mongo_client(
         self,
@@ -488,3 +497,141 @@ class MongoClient:
                 f"Ошибка при получении позиции команды {team_id} в рейтинге: {e}",
             )
             return None
+
+    async def get_user_balance(
+        self,
+        user_id: int,
+    ) -> int:
+        """
+        Получает баланс CD токенов пользователя.
+        
+        Args:
+            user_id: Telegram user_id
+        
+        Returns:
+            Баланс пользователя (по умолчанию 0)
+        """
+        try:
+            user = await self.get_user(user_id)
+            if user:
+                return user.balance or 0
+            return 0
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении баланса пользователя {user_id}: {e}",
+            )
+            return 0
+
+    async def add_transaction(
+        self,
+        user_id: int,
+        transaction_type: TransactionType,
+        amount: int,
+        description: str,
+    ) -> Transaction:
+        """
+        Добавляет транзакцию и обновляет баланс пользователя.
+        
+        Args:
+            user_id: Telegram user_id
+            transaction_type: Тип транзакции (начисление/списание)
+            amount: Сумма транзакции
+            description: Описание операции
+        
+        Returns:
+            Созданная транзакция
+        """
+        try:
+            import secrets
+            transaction_id = f"tx_{secrets.token_urlsafe(12)}"
+            
+            # Создаем транзакцию
+            transaction = Transaction(
+                id=transaction_id,
+                user_id=user_id,
+                transaction_type=transaction_type,
+                amount=amount,
+                description=description,
+            )
+            
+            # Сохраняем транзакцию
+            await self.transactions_collection.insert_one(transaction.model_dump())
+            
+            # Обновляем баланс пользователя
+            user = await self.get_user(user_id)
+            if user:
+                if transaction_type == TransactionType.DEPOSIT:
+                    new_balance = (user.balance or 0) + amount
+                else:  # WITHDRAWAL
+                    new_balance = max(0, (user.balance or 0) - amount)
+                
+                await self.users_collection.update_one(
+                    {"id": user_id},
+                    {
+                        "$set": {
+                            "balance": new_balance,
+                            "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                        }
+                    },
+                )
+            else:
+                # Если пользователя нет, создаем его с балансом
+                if transaction_type == TransactionType.DEPOSIT:
+                    new_balance = amount
+                else:
+                    new_balance = 0
+                
+                # Создаем базового пользователя (минимальные данные)
+                from src.models.user_roles import UserRole
+                new_user = User(
+                    id=user_id,
+                    balance=new_balance,
+                    role=UserRole.USER,
+                )
+                await self.users_collection.insert_one(new_user.model_dump())
+            
+            _LOG.info(
+                f"Транзакция {transaction_id} создана для пользователя {user_id}: "
+                f"{transaction_type.value} {amount} CD токенов",
+            )
+            
+            return transaction
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при создании транзакции для пользователя {user_id}: {e}",
+            )
+            raise
+
+    async def get_user_transactions(
+        self,
+        user_id: int,
+        limit: int = 20,
+    ) -> list[Transaction]:
+        """
+        Получает историю транзакций пользователя.
+        
+        Args:
+            user_id: Telegram user_id
+            limit: Максимальное количество транзакций
+        
+        Returns:
+            Список транзакций (от новых к старым)
+        """
+        try:
+            cursor = (
+                self.transactions_collection
+                .find({"user_id": user_id})
+                .sort("created_at", -1)
+                .limit(limit)
+            )
+            
+            transactions = []
+            async for doc in cursor:
+                transactions.append(Transaction(**doc))
+            
+            return transactions
+        except Exception as e:
+            _LOG.error(
+                f"Ошибка при получении транзакций пользователя {user_id}: {e}",
+            )
+            return []
