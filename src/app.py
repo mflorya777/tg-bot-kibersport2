@@ -17,6 +17,7 @@ from src.modules.handlers import (
     admin_callback_handler,
     team_create_message_handler,
     tournament_create_message_handler,
+    support_question_message_handler,
     set_mongo_client,
 )
 
@@ -40,8 +41,13 @@ async def register_handlers(
         start_handler,
         Command("start"),
     )
-    # Регистрируем обработчик создания турнира ПЕРЕД обработчиком создания команды
-    # чтобы он имел приоритет при проверке состояния
+    # Регистрируем обработчики в порядке приоритета:
+    # 1. Обработчик вопросов в поддержку (самый высокий приоритет)
+    # 2. Обработчик создания турнира
+    # 3. Обработчик создания команды
+    dp.message.register(
+        support_question_message_handler,
+    )
     dp.message.register(
         tournament_create_message_handler,
     )
@@ -55,6 +61,8 @@ async def register_handlers(
         | F.data.startswith("team_")
         | F.data.startswith("tournaments_")
         | F.data.startswith("ratings_")
+        | F.data.startswith("support_")
+        | F.data.startswith("faq_")
         | (F.data.startswith("tournament_") & ~F.data.startswith("tournament_create_") & ~F.data.startswith("tournament_join_") & ~F.data.startswith("tournament_confirm_")),
     )
     dp.callback_query.register(

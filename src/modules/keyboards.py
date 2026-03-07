@@ -817,3 +817,85 @@ def get_ratings_tournament_select_keyboard(
         inline_keyboard=keyboard_rows,
     )
     return keyboard
+
+
+def get_support_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для раздела поддержки.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💬 Задать вопрос",
+                    callback_data="support_ask",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❓ Частые вопросы",
+                    callback_data="support_faq",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="menu_back",
+                ),
+            ],
+        ],
+    )
+    return keyboard
+
+
+def get_faq_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру с частыми вопросами.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❓ Тестовый вопрос 1",
+                    callback_data="faq_1",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❓ Тестовый вопрос 2",
+                    callback_data="faq_2",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❓ Тестовый вопрос 3",
+                    callback_data="faq_3",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❓ Тестовый вопрос 4",
+                    callback_data="faq_4",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❓ Тестовый вопрос 5",
+                    callback_data="faq_5",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❓ Тестовый вопрос 6",
+                    callback_data="faq_6",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="menu_support",
+                ),
+            ],
+        ],
+    )
+    return keyboard

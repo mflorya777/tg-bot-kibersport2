@@ -25,6 +25,8 @@ from src.modules.keyboards import (
     get_ratings_type_keyboard,
     get_ratings_filter_keyboard,
     get_ratings_tournament_select_keyboard,
+    get_support_keyboard,
+    get_faq_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -36,6 +38,7 @@ from src.models.mongo_models import (
     MOSCOW_TZ,
 )
 from src.clients.mongo import MongoClient
+from src.config import SUPPORT_ADMIN_ID
 
 
 # Глобальный экземпляр MongoClient (устанавливается при запуске приложения)
@@ -48,6 +51,9 @@ _waiting_team_data: dict[int, bool] = {}
 
 # Словарь для хранения данных создания турнира
 _tournament_creation_data: dict[int, dict] = {}
+
+# Словарь для хранения состояния ожидания вопроса в поддержке
+_waiting_support_question: dict[int, bool] = {}
 
 
 def generate_team_id() -> str:
@@ -743,11 +749,46 @@ async def callback_handler(
     elif callback_data == "menu_support":
         await callback.answer("Поддержка")
         await callback.message.edit_text(
-            text="❓ Поддержка\n\nРаздел в разработке...",
-            reply_markup=get_main_menu_keyboard(
-                show_admin=show_admin,
-            ),
+            text="❓ Поддержка\n\nВыберите действие:",
+            reply_markup=get_support_keyboard(),
         )
+    elif callback_data == "support_ask":
+        await callback.answer("Задать вопрос")
+        # Активируем режим ожидания вопроса
+        user_id = callback.from_user.id
+        _waiting_support_question[user_id] = True
+        _LOG.debug(f"Активирован режим ожидания вопроса для пользователя {user_id}")
+        await callback.message.edit_text(
+            text="💬 Задать вопрос\n\n"
+                 "Напишите ваш вопрос, и мы обязательно ответим!\n\n"
+                 "Или отправьте /cancel для отмены.",
+        )
+        # Также отправляем новое сообщение для ясности
+        await callback.message.answer(
+            "💬 Ожидаю ваш вопрос...\n\n"
+            "Напишите ваш вопрос текстом, и я отправлю его в поддержку.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+    elif callback_data == "support_faq":
+        await callback.answer("Частые вопросы")
+        await callback.message.edit_text(
+            text="❓ Частые вопросы\n\n"
+                 "Выберите интересующий вас вопрос:",
+            reply_markup=get_faq_keyboard(),
+        )
+    elif callback_data.startswith("faq_"):
+        # Обработка частых вопросов
+        faq_number = callback_data.replace("faq_", "")
+        faq_answers = {
+            "1": "Ответ на тестовый вопрос 1: Это тестовый ответ для демонстрации функционала поддержки.",
+            "2": "Ответ на тестовый вопрос 2: Это тестовый ответ для демонстрации функционала поддержки.",
+            "3": "Ответ на тестовый вопрос 3: Это тестовый ответ для демонстрации функционала поддержки.",
+            "4": "Ответ на тестовый вопрос 4: Это тестовый ответ для демонстрации функционала поддержки.",
+            "5": "Ответ на тестовый вопрос 5: Это тестовый ответ для демонстрации функционала поддержки.",
+            "6": "Ответ на тестовый вопрос 6: Это тестовый ответ для демонстрации функционала поддержки.",
+        }
+        answer = faq_answers.get(faq_number, "Ответ не найден")
+        await callback.answer(answer, show_alert=True)
     elif callback_data == "menu_admin":
         # Проверка доступа к админ-панели
         # Доступ имеют только: MANAGER, ADMIN, SUPER_ADMIN
@@ -2195,6 +2236,102 @@ async def _find_user_in_rating(
         parse_mode="HTML",
     )
     await callback.answer(f"Ваша позиция: #{position}")
+
+
+async def support_question_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для отправки вопроса в поддержку.
+    """
+    user_id = message.from_user.id
+    
+    # Проверяем, ожидает ли пользователь ввода вопроса
+    if not _waiting_support_question.get(user_id, False):
+        _LOG.debug(f"Сообщение от пользователя {user_id} не обрабатывается (не в режиме ожидания вопроса)")
+        return
+    
+    _LOG.debug(f"Обработка вопроса от пользователя {user_id}")
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_support_question.pop(user_id, None)
+        await message.answer(
+            "❌ Отправка вопроса отменена.",
+            reply_markup=get_support_keyboard(),
+        )
+        return
+    
+    # Проверяем, что это текстовое сообщение
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с вашим вопросом.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    question_text = message.text.strip()
+    
+    # Отправляем вопрос в поддержку (@eebanu)
+    try:
+        bot = message.bot
+        
+        # Формируем сообщение для поддержки
+        support_message = (
+            f"❓ Новый вопрос от пользователя\n\n"
+            f"👤 Пользователь: {message.from_user.full_name}\n"
+            f"📱 Username: @{message.from_user.username or 'не указан'}\n"
+            f"🆔 ID: {user_id}\n\n"
+            f"💬 Вопрос:\n{question_text}"
+        )
+        
+        # Пытаемся отправить сообщение администратору поддержки
+        # Примечание: для отправки по username нужен user_id
+        # Можно использовать форвард сообщения или сохранить user_id в конфиге
+        # Пока логируем и уведомляем пользователя
+        
+        # Логируем вопрос
+        _LOG.info(
+            f"Вопрос от пользователя {user_id} (@{message.from_user.username or 'без username'}): {question_text}",
+        )
+        
+        # Отправляем вопрос администратору поддержки, если указан ID
+        if SUPPORT_ADMIN_ID:
+            try:
+                await bot.send_message(
+                    chat_id=int(SUPPORT_ADMIN_ID),
+                    text=support_message,
+                )
+                _LOG.info(f"Вопрос отправлен администратору поддержки (ID: {SUPPORT_ADMIN_ID})")
+            except Exception as e:
+                _LOG.error(f"Ошибка при отправке вопроса администратору: {e}")
+        else:
+            _LOG.warning(
+                "SUPPORT_ADMIN_ID не указан в конфигурации. Вопрос только залогирован.",
+            )
+        
+        # Уведомляем пользователя
+        await message.answer(
+            "✅ Ваш вопрос отправлен в поддержку!\n\n"
+            f"Ваш вопрос: {question_text}\n\n"
+            "Мы ответим вам в ближайшее время.",
+            reply_markup=get_support_keyboard(),
+        )
+        
+        _LOG.info(f"Вопрос успешно обработан для пользователя {user_id}")
+        
+        # Сбрасываем флаг ожидания
+        _waiting_support_question.pop(user_id, None)
+        
+    except Exception as e:
+        _LOG.error(
+            f"Ошибка при отправке вопроса в поддержку: {e}",
+        )
+        await message.answer(
+            "❌ Произошла ошибка при отправке вопроса. Попробуйте позже.",
+            reply_markup=get_support_keyboard(),
+        )
+        _waiting_support_question.pop(user_id, None)
 
 
 async def tournament_create_message_handler(

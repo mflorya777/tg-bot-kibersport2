@@ -8,6 +8,8 @@ load_dotenv("local.env")
 
 TOKEN = getenv("BOT_TOKEN")
 MINI_APP_URL = getenv("MINI_APP_URL", "https://your-mini-app-domain.com/profile")
+# ID администратора поддержки (@mfguki) - можно получить через @userinfobot
+SUPPORT_ADMIN_ID = getenv("SUPPORT_ADMIN_ID", None)
 
 
 class MongoConfig(BaseSettings):
