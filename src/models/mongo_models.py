@@ -651,3 +651,56 @@ class Giveaway(BaseModel):
         None,
         description="Дата последнего обновления",
     )
+
+
+class ActionType(str, Enum):
+    """
+    Тип действия в журнале.
+    """
+    TOURNAMENT_CREATED = "tournament_created"
+    TOURNAMENT_UPDATED = "tournament_updated"
+    RESULTS_ENTERED = "results_entered"
+    RESULTS_PUBLISHED = "results_published"
+    TOKENS_ADDED = "tokens_added"
+    TOKENS_REMOVED = "tokens_removed"
+    SETTINGS_CHANGED = "settings_changed"
+    PROMOCODE_CREATED = "promocode_created"
+    PROMOCODE_UPDATED = "promocode_updated"
+    GIVEAWAY_CREATED = "giveaway_created"
+    GIVEAWAY_WINNERS_DETERMINED = "giveaway_winners_determined"
+    USER_ROLE_CHANGED = "user_role_changed"
+    USER_BANNED = "user_banned"
+    USER_UNBANNED = "user_unbanned"
+    TEAM_BANNED = "team_banned"
+    TEAM_UNBANNED = "team_unbanned"
+    RATING_RECALCULATED = "rating_recalculated"
+
+
+class ActionLog(BaseModel):
+    """
+    Запись в журнале действий.
+    """
+    id: str = Field(
+        ...,
+        description="Уникальный ID записи",
+    )
+    action_type: ActionType = Field(
+        ...,
+        description="Тип действия",
+    )
+    user_id: int = Field(
+        ...,
+        description="Telegram user_id пользователя, выполнившего действие",
+    )
+    description: str = Field(
+        ...,
+        description="Описание действия",
+    )
+    details: Optional[dict] = Field(
+        None,
+        description="Дополнительные детали действия (JSON)",
+    )
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
+        description="Дата и время действия",
+    )

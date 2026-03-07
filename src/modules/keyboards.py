@@ -1888,3 +1888,52 @@ def get_admin_broadcast_preview_keyboard(
         inline_keyboard=keyboard_rows,
     )
     return keyboard
+
+
+def get_admin_actions_log_keyboard(
+    page: int = 0,
+    has_next: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для журнала действий.
+    
+    Args:
+        page: Номер страницы
+        has_next: Есть ли следующая страница
+    """
+    keyboard_rows = []
+    
+    if page > 0:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data=f"admin_actions_log_page_{page - 1}",
+            ),
+        ])
+    
+    if has_next:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="➡️ Вперед",
+                callback_data=f"admin_actions_log_page_{page + 1}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="🔄 Обновить",
+            callback_data="admin_actions_log",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin_back",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard

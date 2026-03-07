@@ -55,6 +55,7 @@ from src.modules.keyboards import (
     get_admin_broadcast_keyboard,
     get_admin_broadcast_tournaments_keyboard,
     get_admin_broadcast_preview_keyboard,
+    get_admin_actions_log_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -76,6 +77,8 @@ from src.models.mongo_models import (
     Giveaway,
     GiveawayStatus,
     GiveawayParticipationType,
+    ActionLog,
+    ActionType,
     MOSCOW_TZ,
 )
 from src.clients.mongo import MongoClient
@@ -2284,9 +2287,19 @@ async def admin_callback_handler(
             try:
                 # Публикуем результаты
                 await _mongo_client.publish_tournament_results(tournament_id)
+                # Логируем публикацию результатов
+                tournament = await _mongo_client.get_tournament(tournament_id)
+                if tournament:
+                    await _mongo_client.add_action_log(
+                        action_type=ActionType.RESULTS_PUBLISHED,
+                        user_id=callback.from_user.id,
+                        description=f"Опубликованы результаты турнира '{tournament.name}'",
+                        details={"tournament_id": tournament_id},
+                    )
                 
                 # Отправляем уведомления участникам
-                tournament = await _mongo_client.get_tournament(tournament_id)
+                if not tournament:
+                    tournament = await _mongo_client.get_tournament(tournament_id)
                 if tournament:
                     participants = []
                     if tournament.format == TournamentFormat.SOLO:
@@ -2420,6 +2433,13 @@ async def admin_callback_handler(
         if _mongo_client is not None:
             try:
                 await _mongo_client.update_team_ban_status(team_id, True)
+                # Логируем бан команды
+                await _mongo_client.add_action_log(
+                    action_type=ActionType.TEAM_BANNED,
+                    user_id=callback.from_user.id,
+                    description=f"Забанена команда (ID: {team_id})",
+                    details={"team_id": team_id},
+                )
                 team = await _mongo_client.get_team(team_id)
                 if team:
                     team_card_text = await format_admin_team_card_text(team)
@@ -2443,6 +2463,13 @@ async def admin_callback_handler(
         if _mongo_client is not None:
             try:
                 await _mongo_client.update_team_ban_status(team_id, False)
+                # Логируем разбан команды
+                await _mongo_client.add_action_log(
+                    action_type=ActionType.TEAM_UNBANNED,
+                    user_id=callback.from_user.id,
+                    description=f"Разбанена команда (ID: {team_id})",
+                    details={"team_id": team_id},
+                )
                 team = await _mongo_client.get_team(team_id)
                 if team:
                     team_card_text = await format_admin_team_card_text(team)
@@ -2524,6 +2551,13 @@ async def admin_callback_handler(
         if _mongo_client is not None:
             try:
                 await _mongo_client.update_user_ban_status(target_user_id, True)
+                # Логируем бан пользователя
+                await _mongo_client.add_action_log(
+                    action_type=ActionType.USER_BANNED,
+                    user_id=callback.from_user.id,
+                    description=f"Забанен пользователь (ID: {target_user_id})",
+                    details={"target_user_id": target_user_id},
+                )
                 target_user = await _mongo_client.get_user(target_user_id)
                 if target_user:
                     team = None
@@ -2550,6 +2584,13 @@ async def admin_callback_handler(
         if _mongo_client is not None:
             try:
                 await _mongo_client.update_user_ban_status(target_user_id, False)
+                # Логируем разбан пользователя
+                await _mongo_client.add_action_log(
+                    action_type=ActionType.USER_UNBANNED,
+                    user_id=callback.from_user.id,
+                    description=f"Разбанен пользователь (ID: {target_user_id})",
+                    details={"target_user_id": target_user_id},
+                )
                 target_user = await _mongo_client.get_user(target_user_id)
                 if target_user:
                     team = None
@@ -2597,6 +2638,13 @@ async def admin_callback_handler(
                 role = UserRole[role_name]
                 if _mongo_client is not None:
                     await _mongo_client.update_user_role(target_user_id, role)
+                    # Логируем изменение роли
+                    await _mongo_client.add_action_log(
+                        action_type=ActionType.USER_ROLE_CHANGED,
+                        user_id=callback.from_user.id,
+                        description=f"Изменена роль пользователя (ID: {target_user_id}) на {role.value}",
+                        details={"target_user_id": target_user_id, "new_role": role.value},
+                    )
                     target_user = await _mongo_client.get_user(target_user_id)
                     if target_user:
                         team = None
@@ -2647,6 +2695,12 @@ async def admin_callback_handler(
         if _mongo_client is not None:
             try:
                 await _mongo_client.recalculate_ratings()
+                # Логируем пересчет рейтинга
+                await _mongo_client.add_action_log(
+                    action_type=ActionType.RATING_RECALCULATED,
+                    user_id=callback.from_user.id,
+                    description="Выполнен пересчет рейтинга",
+                )
                 await callback.answer("✅ Рейтинг успешно обновлён!", show_alert=True)
                 # Обновляем экран
                 rules = await _mongo_client.get_rating_rules()
@@ -2772,6 +2826,12 @@ async def admin_callback_handler(
                 new_enabled = not settings.daily_bonus_enabled if settings else False
                 await _mongo_client.update_bonus_settings(
                     daily_bonus_enabled=new_enabled,
+                )
+                # Логируем изменение настроек
+                await _mongo_client.add_action_log(
+                    action_type=ActionType.SETTINGS_CHANGED,
+                    user_id=callback.from_user.id,
+                    description=f"Изменены настройки ежедневного бонуса: {'включен' if new_enabled else 'выключен'}",
                 )
                 await callback.answer("✅ Настройки обновлены!", show_alert=True)
                 # Обновляем экран
@@ -3060,6 +3120,14 @@ async def admin_callback_handler(
                     # Определяем победителей (случайный выбор из участников)
                     winners = await _mongo_client.determine_giveaway_winners(actual_promotion_id)
                     
+                    # Логируем определение победителей
+                    await _mongo_client.add_action_log(
+                        action_type=ActionType.GIVEAWAY_WINNERS_DETERMINED,
+                        user_id=callback.from_user.id,
+                        description=f"Определены победители розыгрыша '{promotion.name}' ({len(winners)} победителей)",
+                        details={"giveaway_id": actual_promotion_id, "winners_count": len(winners)},
+                    )
+                    
                     if winners:
                         # Формируем список победителей
                         winners_text = "🏆 Победители розыгрыша:\n\n"
@@ -3301,7 +3369,7 @@ async def admin_callback_handler(
                      "Введите новый текст сообщения:\n\n"
                      "Или отправьте /cancel для отмены.",
             )
-    elif callback_data == "admin_audit":
+    elif callback_data == "admin_audit" or callback_data == "admin_log" or callback_data == "admin_actions_log":
         # Дополнительная проверка: только супер-админ может видеть журнал действий
         if user_role != UserRole.SUPER_ADMIN:
             _LOG.warning(
@@ -3314,12 +3382,18 @@ async def admin_callback_handler(
             )
             return
         await callback.answer("Журнал действий")
-        await callback.message.edit_text(
-            text="🧾 Журнал действий\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
-            ),
-        )
+        await _show_actions_log(callback, page=0)
+    elif callback_data.startswith("admin_actions_log_page_"):
+        # Проверка прав: только SUPER_ADMIN может видеть журнал действий
+        if user_role != UserRole.SUPER_ADMIN:
+            await callback.answer(
+                "❌ Доступно только супер-админам",
+                show_alert=True,
+            )
+            return
+        page = int(callback_data.replace("admin_actions_log_page_", ""))
+        await callback.answer("Журнал действий")
+        await _show_actions_log(callback, page=page)
     elif callback_data == "admin_tournament_create":
         # Проверка прав: только ADMIN и SUPER_ADMIN могут создавать турниры
         if user_role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
@@ -3521,6 +3595,13 @@ async def admin_callback_handler(
             try:
                 tournament = await _create_tournament_from_data(data)
                 await _mongo_client.create_tournament(tournament)
+                # Логируем создание турнира
+                await _mongo_client.add_action_log(
+                    action_type=ActionType.TOURNAMENT_CREATED,
+                    user_id=user_id,
+                    description=f"Создан турнир '{tournament.name}'",
+                    details={"tournament_id": tournament.id},
+                )
                 _tournament_creation_data.pop(user_id, None)
                 await callback.answer("✅ Турнир создан и опубликован!", show_alert=True)
                 await callback.message.edit_text(
@@ -4374,6 +4455,14 @@ async def admin_token_amount_message_handler(
                 amount=amount,
                 description=description,
             )
+            # Логируем операцию с токенами
+            action_type = ActionType.TOKENS_ADDED if action == "add" else ActionType.TOKENS_REMOVED
+            await _mongo_client.add_action_log(
+                action_type=action_type,
+                user_id=user_id,
+                description=f"{'Начислено' if action == 'add' else 'Списано'} {amount} CD токенов пользователю (ID: {target_user_id})",
+                details={"target_user_id": target_user_id, "amount": amount},
+            )
             
             new_balance = await _mongo_client.get_user_balance(target_user_id)
             action_text = "начислено" if action == "add" else "списано"
@@ -4872,6 +4961,13 @@ async def admin_promocode_data_message_handler(
                         valid_from=valid_from,
                         valid_until=valid_until,
                     )
+                    # Логируем создание промокода
+                    await _mongo_client.add_action_log(
+                        action_type=ActionType.PROMOCODE_CREATED,
+                        user_id=user_id,
+                        description=f"Создан промокод '{promocode.code}' (сумма: {promocode.amount} токенов)",
+                        details={"promocode_id": promocode.id},
+                    )
                     _waiting_promocode_data.pop(user_id, None)
                     await message.answer(
                         f"✅ Промокод '{promocode.code}' успешно создан!\n\n"
@@ -5158,6 +5254,13 @@ async def admin_giveaway_message_handler(
                         condition_description=data.get("condition_description"),
                         ticket_limit_per_user=ticket_limit,
                     )
+                    # Логируем создание розыгрыша
+                    await _mongo_client.add_action_log(
+                        action_type=ActionType.GIVEAWAY_CREATED,
+                        user_id=user_id,
+                        description=f"Создан розыгрыш '{promotion.name}'",
+                        details={"giveaway_id": promotion.id},
+                    )
                     _waiting_giveaway_data.pop(user_id, None)
                     await message.answer(
                         f"✅ Розыгрыш '{promotion.name}' успешно создан!\n\n"
@@ -5254,4 +5357,95 @@ async def admin_broadcast_message_handler(
                 broadcast_type=broadcast_type,
                 tournament_id=tournament_id,
             ),
+        )
+
+
+async def _show_actions_log(
+    callback: types.CallbackQuery,
+    page: int = 0,
+) -> None:
+    """
+    Показывает журнал действий.
+    
+    Args:
+        callback: Объект callback query
+        page: Номер страницы
+    """
+    if _mongo_client is not None:
+        try:
+            logs = await _mongo_client.get_action_logs(page=page, limit=10)
+            has_next = len(logs) > 10
+            if has_next:
+                logs = logs[:10]
+            
+            if not logs:
+                await callback.message.edit_text(
+                    text="🧾 Журнал действий\n\n"
+                         "Записей пока нет.",
+                    reply_markup=get_admin_actions_log_keyboard(page=page, has_next=False),
+                )
+                return
+            
+            # Формируем текст журнала
+            lines = ["🧾 Журнал действий\n"]
+            
+            action_type_names = {
+                ActionType.TOURNAMENT_CREATED: "🏆 Создан турнир",
+                ActionType.TOURNAMENT_UPDATED: "✏️ Изменен турнир",
+                ActionType.RESULTS_ENTERED: "📊 Внесены результаты",
+                ActionType.RESULTS_PUBLISHED: "✅ Опубликованы результаты",
+                ActionType.TOKENS_ADDED: "➕ Начислены токены",
+                ActionType.TOKENS_REMOVED: "➖ Списаны токены",
+                ActionType.SETTINGS_CHANGED: "⚙️ Изменены настройки",
+                ActionType.PROMOCODE_CREATED: "🎟 Создан промокод",
+                ActionType.PROMOCODE_UPDATED: "✏️ Изменен промокод",
+                ActionType.GIVEAWAY_CREATED: "🎉 Создан розыгрыш",
+                ActionType.GIVEAWAY_WINNERS_DETERMINED: "🏆 Определены победители розыгрыша",
+                ActionType.USER_ROLE_CHANGED: "🎭 Изменена роль пользователя",
+                ActionType.USER_BANNED: "🚫 Забанен пользователь",
+                ActionType.USER_UNBANNED: "✅ Разбанен пользователь",
+                ActionType.TEAM_BANNED: "🚫 Забанена команда",
+                ActionType.TEAM_UNBANNED: "✅ Разбанена команда",
+                ActionType.RATING_RECALCULATED: "📊 Пересчитан рейтинг",
+            }
+            
+            for log in logs:
+                action_name = action_type_names.get(log.action_type, log.action_type.value)
+                timestamp = log.created_at.strftime("%d.%m.%Y %H:%M")
+                
+                # Получаем имя пользователя
+                user_name = f"ID:{log.user_id}"
+                if _mongo_client is not None:
+                    try:
+                        user = await _mongo_client.get_user(log.user_id)
+                        if user:
+                            user_name = user.nickname or user.name or f"ID:{log.user_id}"
+                    except Exception:
+                        pass
+                
+                lines.append(f"<b>{action_name}</b>")
+                lines.append(f"👤 {user_name}")
+                lines.append(f"📝 {log.description}")
+                lines.append(f"🕐 {timestamp}")
+                lines.append("─" * 30)
+            
+            text = "\n".join(lines)
+            
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=get_admin_actions_log_keyboard(page=page, has_next=has_next),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении журнала действий: {e}")
+            await callback.message.edit_text(
+                text="🧾 Журнал действий\n\n"
+                     "❌ Произошла ошибка при загрузке журнала.",
+                reply_markup=get_admin_actions_log_keyboard(page=page, has_next=False),
+            )
+    else:
+        await callback.message.edit_text(
+            text="🧾 Журнал действий\n\n"
+                 "❌ Ошибка подключения к базе данных.",
+            reply_markup=get_admin_actions_log_keyboard(page=page, has_next=False),
         )

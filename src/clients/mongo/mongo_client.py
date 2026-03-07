@@ -24,6 +24,8 @@ from src.models.mongo_models import (
     Giveaway,
     GiveawayStatus,
     GiveawayParticipationType,
+    ActionLog,
+    ActionType,
 )
 from src.models.user_roles import UserRole
 
@@ -2000,4 +2002,64 @@ class MongoClient:
             return users
         except Exception as e:
             _LOG.error(f"Ошибка при получении всех пользователей: {e}")
+            return []
+
+    async def add_action_log(
+        self,
+        action_type: ActionType,
+        user_id: int,
+        description: str,
+        details: Optional[dict] = None,
+    ) -> None:
+        """
+        Добавляет запись в журнал действий.
+        
+        Args:
+            action_type: Тип действия
+            user_id: ID пользователя, выполнившего действие
+            description: Описание действия
+            details: Дополнительные детали
+        """
+        try:
+            import secrets
+            log_id = f"action_log_{secrets.token_urlsafe(12)}"
+            log = ActionLog(
+                id=log_id,
+                action_type=action_type,
+                user_id=user_id,
+                description=description,
+                details=details,
+            )
+            action_logs_collection = self.db["action_logs"]
+            await action_logs_collection.insert_one(log.model_dump())
+            _LOG.info(f"Добавлена запись в журнал действий: {action_type.value} от пользователя {user_id}")
+        except Exception as e:
+            _LOG.error(f"Ошибка при добавлении записи в журнал действий: {e}")
+            # Не поднимаем исключение, чтобы не прерывать основную операцию
+    
+    async def get_action_logs(
+        self,
+        page: int = 0,
+        limit: int = 10,
+    ) -> list[ActionLog]:
+        """
+        Получает записи из журнала действий.
+        
+        Args:
+            page: Номер страницы
+            limit: Количество записей на странице
+        
+        Returns:
+            Список записей (отсортированные по дате, новые первыми)
+        """
+        try:
+            action_logs_collection = self.db["action_logs"]
+            skip = page * limit
+            cursor = action_logs_collection.find({}).sort("created_at", -1).skip(skip).limit(limit + 1)
+            logs = []
+            async for doc in cursor:
+                logs.append(ActionLog(**doc))
+            return logs
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении журнала действий: {e}")
             return []
