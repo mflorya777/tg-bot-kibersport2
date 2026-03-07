@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Профиль - Kibersport</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .profile-card {
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .profile-section {
+            margin-bottom: 20px;
+        }
+
+        .profile-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .profile-section h2 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+
+        .profile-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--tg-theme-section-separator-color, #e0e0e0);
+        }
+
+        .profile-item:last-child {
+            border-bottom: none;
+        }
+
+        .profile-label {
+            font-weight: 500;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+
+        .profile-value {
+            color: var(--tg-theme-text-color, #000000);
+            text-align: right;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: var(--tg-theme-bg-color, #ffffff);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #ff3333;
+        }
+
+        .button {
+            background: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .button:active {
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧑 Профиль</h1>
+        </div>
+
+        <div id="loading" class="loading">Загрузка данных...</div>
+        <div id="error" class="error" style="display: none;"></div>
+        <div id="profile" style="display: none;">
+            <div class="profile-card">
+                <div class="profile-section">
+                    <h2>Основная информация</h2>
+                    <div class="profile-item">
+                        <span class="profile-label">👤 Никнейм</span>
+                        <span class="profile-value" id="nickname">—</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">🎮 Игра/дисциплина</span>
+                        <span class="profile-value" id="game">—</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">🌍 Регион/страна</span>
+                        <span class="profile-value" id="region">—</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">🆔 ID пользователя</span>
+                        <span class="profile-value" id="user-id">—</span>
+                    </div>
+                </div>
+
+                <div class="profile-section">
+                    <h2>Статистика</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="tournaments">0</div>
+                            <div class="stat-label">Турниров сыграно</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="kills">0</div>
+                            <div class="stat-label">Всего киллов</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="rating">—</div>
+                            <div class="stat-label">Место в рейтинге</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="team">—</div>
+                            <div class="stat-label">Команда</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button class="button" onclick="editProfile()">✏️ Изменить профиль</button>
+            <button class="button" onclick="linkSocial()">📎 Привязать соцсети</button>
+            <button class="button" onclick="privacySettings()">🔒 Настройки приватности</button>
+        </div>
+    </div>
+
+    <script>
+        // Инициализация Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // Получение данных пользователя из Telegram
+        const user = tg.initDataUnsafe?.user || {};
+        const userId = user.id || 'Не указан';
+        const username = user.username ? `@${user.username}` : 'Не указан';
+        const firstName = user.first_name || '';
+        const lastName = user.last_name || '';
+
+        // Отображение данных
+        function displayProfile(data) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('profile').style.display = 'block';
+
+            // Основная информация
+            document.getElementById('nickname').textContent = data.nickname || username || `${firstName} ${lastName}`.trim() || 'Не указан';
+            document.getElementById('game').textContent = data.game_discipline || 'Не указана';
+            document.getElementById('region').textContent = data.region_country || 'Не указан';
+            document.getElementById('user-id').textContent = userId;
+
+            // Статистика
+            document.getElementById('tournaments').textContent = data.tournaments_played || 0;
+            document.getElementById('kills').textContent = data.total_kills || 0;
+            document.getElementById('rating').textContent = data.rating_position ? `#${data.rating_position}` : '—';
+            document.getElementById('team').textContent = data.team_name || 'Нет команды';
+        }
+
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').textContent = message;
+        }
+
+        // Загрузка данных профиля
+        async function loadProfile() {
+            try {
+                // Здесь можно добавить запрос к API бота для получения полных данных
+                // Пока используем данные из Telegram
+                const profileData = {
+                    nickname: username,
+                    game_discipline: null,
+                    region_country: null,
+                    tournaments_played: 0,
+                    total_kills: 0,
+                    rating_position: null,
+                    team_name: null
+                };
+
+                displayProfile(profileData);
+            } catch (error) {
+                console.error('Ошибка загрузки профиля:', error);
+                showError('Не удалось загрузить данные профиля');
+            }
+        }
+
+        // Функции для кнопок
+        function editProfile() {
+            tg.showAlert('Функция редактирования профиля будет доступна в следующей версии');
+        }
+
+        function linkSocial() {
+            tg.showAlert('Функция привязки соцсетей будет доступна в следующей версии');
+        }
+
+        function privacySettings() {
+            tg.showAlert('Настройки приватности будут доступны в следующей версии');
+        }
+
+        // Загружаем профиль при загрузке страницы
+        loadProfile();
+    </script>
+</body>
+</html>
