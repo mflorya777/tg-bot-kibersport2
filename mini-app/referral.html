@@ -250,30 +250,35 @@
         // Загрузка данных рефералки
         async function loadReferralData() {
             try {
-                // Здесь можно добавить запрос к API бота для получения данных
-                // Пока используем данные из Telegram и генерируем ссылку
+                // Определяем URL API
+                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                const apiUrl = `${apiBaseUrl}/api/referral/${userId}`;
                 
-                // Получаем реферальный код пользователя
-                // В реальности это должно приходить с сервера через API
-                // Пока используем формат REF{userId}
-                const referralCode = userId ? `REF${userId}` : 'REF000000';
+                // Получаем initData для проверки подлинности (опционально)
+                const initData = tg.initData || '';
                 
-                // Получаем имя бота из Telegram WebApp
-                const botUsername = tg.initDataUnsafe?.start_param || 'testtt_crm_bot';
-                const referralLink = `https://t.me/${botUsername}?start=${referralCode}`;
+                // Запрос к API
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Init-Data': initData,
+                    },
+                });
                 
-                // Данные рефералки (в реальности должны приходить с сервера)
-                const referralData = {
-                    referral_link: referralLink,
-                    referral_code: referralCode,
-                    invited_count: 0,
-                    bonus_amount: 0,
-                };
-
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const referralData = await response.json();
+                
+                // Логируем полученные данные для отладки
+                console.log('Данные реферальной системы из API:', referralData);
+                
                 displayReferralData(referralData);
             } catch (error) {
                 console.error('Ошибка загрузки данных рефералки:', error);
-                showError('Не удалось загрузить данные');
+                showError('Не удалось загрузить данные. Попробуйте позже.');
             }
         }
 
@@ -344,30 +349,83 @@
         }
 
         // Показать подробные правила
-        function showRules() {
-            const rules = [
-                '🎯 Как работает реферальная программа:',
-                '',
-                '1. Скопируйте вашу персональную ссылку',
-                '2. Поделитесь ссылкой с друзьями',
-                '3. Когда друг зарегистрируется по вашей ссылке, вы получите бонус',
-                '4. Бонусы начисляются автоматически',
-                '',
-                '💰 Размер бонусов:',
-                '• За каждого приглашенного друга: 50 CD токенов',
-                '• Дополнительные бонусы за активность друзей',
-                '',
-                '📊 Статистика:',
-                '• Отслеживайте количество приглашенных друзей',
-                '• Смотрите общую сумму начисленных бонусов',
-                '',
-                '⚠️ Важно:',
-                '• Ссылка должна быть уникальной для каждого пользователя',
-                '• Бонусы начисляются только за реальных пользователей',
-                '• Запрещено создание фейковых аккаунтов',
-            ].join('\n');
-            
-            tg.showAlert(rules);
+        async function showRules() {
+            try {
+                // Загружаем актуальные настройки из API
+                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                const apiUrl = `${apiBaseUrl}/api/referral/${userId}`;
+                const initData = tg.initData || '';
+                
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Init-Data': initData,
+                    },
+                });
+                
+                let bonusPerReferral = 50;
+                let referralCondition = 'регистрация';
+                let antiFraudRule = '1 аккаунт = 1 устройство/1 номер';
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    bonusPerReferral = data.bonus_per_referral || 50;
+                    
+                    // Переводим условие засчитывания на русский
+                    if (data.referral_condition === 'registration') {
+                        referralCondition = 'когда друг зарегистрировался';
+                    } else if (data.referral_condition === 'tournament') {
+                        referralCondition = 'когда друг сыграл турнир';
+                    }
+                    
+                    // Переводим правило защиты от накрутки на русский
+                    if (data.anti_fraud_rule === 'one_account_one_device') {
+                        antiFraudRule = '1 аккаунт = 1 устройство/1 номер';
+                    }
+                }
+                
+                const rules = [
+                    '🎯 Как работает реферальная программа:',
+                    '',
+                    '1. Скопируйте вашу персональную ссылку',
+                    '2. Поделитесь ссылкой с друзьями',
+                    '3. Когда друг зарегистрируется по вашей ссылке, вы получите бонус',
+                    '4. Бонусы начисляются автоматически',
+                    '',
+                    `💰 Размер бонусов:`,
+                    `• За каждого приглашенного друга: ${bonusPerReferral} CD токенов`,
+                    '',
+                    `📋 Условия засчитывания:`,
+                    `• Приглашение считается засчитанным: ${referralCondition}`,
+                    '',
+                    `🛡️ Защита от накрутки:`,
+                    `• ${antiFraudRule}`,
+                    '',
+                    '📊 Статистика:',
+                    '• Отслеживайте количество приглашенных друзей',
+                    '• Смотрите общую сумму начисленных бонусов',
+                    '',
+                    '⚠️ Важно:',
+                    '• Ссылка должна быть уникальной для каждого пользователя',
+                    '• Бонусы начисляются только за реальных пользователей',
+                    '• Запрещено создание фейковых аккаунтов',
+                ].join('\n');
+                
+                tg.showAlert(rules);
+            } catch (error) {
+                console.error('Ошибка загрузки правил:', error);
+                // Показываем правила по умолчанию
+                const defaultRules = [
+                    '🎯 Как работает реферальная программа:',
+                    '',
+                    '1. Скопируйте вашу персональную ссылку',
+                    '2. Поделитесь ссылкой с друзьями',
+                    '3. Когда друг зарегистрируется по вашей ссылке, вы получите бонус',
+                    '4. Бонусы начисляются автоматически',
+                ].join('\n');
+                tg.showAlert(defaultRules);
+            }
         }
 
         // Загружаем данные при загрузке страницы

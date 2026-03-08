@@ -2,6 +2,8 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 import datetime as dt
+import secrets
+import string
 
 from src.clients.mongo import MongoClient
 from src.models.mongo_models import (
@@ -10,6 +12,7 @@ from src.models.mongo_models import (
     TransactionType,
     MOSCOW_TZ,
 )
+from src.config import BOT_USERNAME
 
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -347,7 +350,101 @@ async def buy_ticket(
     except HTTPException:
         raise
     except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Ошибка при покупке билета: {str(e)}",
+            )
+
+
+class ReferralResponse(BaseModel):
+    """Модель ответа для реферальной системы."""
+    referral_link: str
+    referral_code: str
+    invited_count: int = 0
+    bonus_amount: int = 0
+    bonus_per_referral: int = 50
+    referral_condition: str = "registration"
+    anti_fraud_rule: str = "one_account_one_device"
+
+
+@router.get("/referral/{user_id}")
+async def get_referral(
+    user_id: int,
+    x_init_data: Optional[str] = Header(None, alias="X-Init-Data"),
+) -> ReferralResponse:
+    """
+    Получает данные реферальной системы для пользователя.
+    
+    Args:
+        user_id: Telegram user_id пользователя
+        x_init_data: InitData из Telegram WebApp (для проверки подлинности, опционально)
+    
+    Returns:
+        Данные реферальной системы
+    
+    Raises:
+        HTTPException: Если произошла ошибка
+    """
+    if _mongo_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="База данных недоступна",
+        )
+    
+    try:
+        # Получаем пользователя из БД
+        user = await _mongo_client.get_user(user_id)
+        
+        if user is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Пользователь не найден",
+            )
+        
+        # Получаем настройки реферальной системы
+        referral_settings = await _mongo_client.get_referral_settings()
+        if not referral_settings:
+            # Используем значения по умолчанию
+            bonus_per_referral = 50
+            referral_condition = "registration"
+            anti_fraud_rule = "one_account_one_device"
+        else:
+            bonus_per_referral = referral_settings.bonus_per_referral
+            referral_condition = referral_settings.referral_condition
+            anti_fraud_rule = referral_settings.anti_fraud_rule
+        
+        # Генерируем или получаем реферальный код
+        referral_code = user.referral_code
+        if not referral_code:
+            # Генерируем реферальный код, если его нет
+            # Создаем код из 8 символов (буквы и цифры)
+            alphabet = string.ascii_uppercase + string.digits
+            referral_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+            
+            # Сохраняем код в БД
+            await _mongo_client.update_user_referral_code(user_id, referral_code)
+        
+        # Формируем реферальную ссылку
+        # Используем имя бота из конфига
+        referral_link = f"https://t.me/{BOT_USERNAME}?start={referral_code}"
+        
+        # Вычисляем общую сумму начисленных бонусов
+        # Это количество приглашенных друзей * бонус за каждого
+        bonus_amount = user.referrals_count * bonus_per_referral
+        
+        return ReferralResponse(
+            referral_link=referral_link,
+            referral_code=referral_code,
+            invited_count=user.referrals_count,
+            bonus_amount=bonus_amount,
+            bonus_per_referral=bonus_per_referral,
+            referral_condition=referral_condition,
+            anti_fraud_rule=anti_fraud_rule,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Ошибка при покупке билета: {str(e)}",
+            detail=f"Ошибка при получении данных реферальной системы: {str(e)}",
         )

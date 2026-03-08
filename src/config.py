@@ -12,6 +12,8 @@ MINI_APP_URL = getenv("MINI_APP_URL", "https://your-mini-app-domain.com/profile"
 API_URL = getenv("API_URL", "http://localhost:8000")
 # ID администратора поддержки (@mfguki) - можно получить через @userinfobot
 SUPPORT_ADMIN_ID = getenv("SUPPORT_ADMIN_ID", None)
+# Имя бота для формирования реферальных ссылок (без @)
+BOT_USERNAME = getenv("BOT_USERNAME", "testtt_crm_bot")
 
 
 class MongoConfig(BaseSettings):
