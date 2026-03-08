@@ -248,8 +248,65 @@
         // Загрузка данных профиля
         async function loadProfile() {
             try {
-                // Здесь можно добавить запрос к API бота для получения полных данных
-                // Пока используем данные из Telegram
+                // Определяем URL API
+                // Можно использовать переменную окружения или относительный путь
+                // Для продакшена нужно указать полный URL API сервера в переменной API_BASE_URL
+                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                // Если API на другом домене/порту, можно указать здесь
+                // Например: apiBaseUrl = 'http://localhost:8000';
+                const apiUrl = `${apiBaseUrl}/api/profile/${userId}`;
+                
+                // Получаем initData для проверки подлинности (опционально)
+                const initData = tg.initData || '';
+                
+                // Запрос к API
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Init-Data': initData, // Отправляем initData для проверки подлинности
+                    },
+                });
+                
+                if (!response.ok) {
+                    // Если API недоступен или пользователь не найден, используем данные из Telegram
+                    console.warn('API недоступен, используем данные из Telegram');
+                    const profileData = {
+                        nickname: username,
+                        game_discipline: null,
+                        region_country: null,
+                        tournaments_played: 0,
+                        total_kills: 0,
+                        rating_position: null,
+                        team_name: null
+                    };
+                    displayProfile(profileData);
+                    return;
+                }
+                
+                const profileData = await response.json();
+                
+                // Формируем название команды (если есть)
+                let teamDisplayName = null;
+                if (profileData.team_name && profileData.team_tag) {
+                    teamDisplayName = `${profileData.team_name} (${profileData.team_tag})`;
+                } else if (profileData.team_name) {
+                    teamDisplayName = profileData.team_name;
+                }
+                
+                // Отображаем данные профиля
+                displayProfile({
+                    nickname: profileData.nickname || username,
+                    game_discipline: profileData.game_discipline,
+                    region_country: profileData.region_country,
+                    tournaments_played: profileData.tournaments_played || 0,
+                    total_kills: profileData.total_kills || 0,
+                    rating_position: profileData.rating_position,
+                    team_name: teamDisplayName
+                });
+            } catch (error) {
+                console.error('Ошибка загрузки профиля:', error);
+                // В случае ошибки используем данные из Telegram
                 const profileData = {
                     nickname: username,
                     game_discipline: null,
@@ -259,11 +316,7 @@
                     rating_position: null,
                     team_name: null
                 };
-
                 displayProfile(profileData);
-            } catch (error) {
-                console.error('Ошибка загрузки профиля:', error);
-                showError('Не удалось загрузить данные профиля');
             }
         }
 
