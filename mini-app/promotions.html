@@ -250,29 +250,35 @@
         // Загрузка розыгрышей
         async function loadPromotions() {
             try {
-                // Здесь можно добавить запрос к API бота для получения данных
-                // Пока используем тестовые данные
-                const promotionsData = [
-                    {
-                        id: "promo1",
-                        name: "Новогодний розыгрыш",
-                        description: "Выиграй 1000 CD токенов!",
-                        start_date: "2025-01-01T00:00:00",
-                        end_date: "2025-01-31T23:59:59",
-                        participation_type: "tokens",
-                        ticket_cost: 50,
-                        condition_description: null,
-                        ticket_limit_per_user: 10,
-                        status: "active",
-                        user_tickets: 2,
-                        winners: null,
+                // Определяем URL API
+                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                const apiUrl = `${apiBaseUrl}/api/promotions/${userId}`;
+                
+                // Получаем initData для проверки подлинности (опционально)
+                const initData = tg.initData || '';
+                
+                // Запрос к API
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Init-Data': initData,
                     },
-                ];
-
-                displayPromotions(promotionsData);
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Логируем полученные данные для отладки
+                console.log('Данные розыгрышей из API:', data);
+                
+                displayPromotions(data.promotions || []);
             } catch (error) {
                 console.error('Ошибка загрузки розыгрышей:', error);
-                showError('Не удалось загрузить розыгрыши');
+                showError('Не удалось загрузить розыгрыши. Попробуйте позже.');
             }
         }
 
@@ -426,15 +432,46 @@
         }
 
         // Покупка билета
-        function buyTicket(promotionId, cost) {
+        async function buyTicket(promotionId, cost) {
             tg.showConfirm(
                 `Купить билет за ${cost} CD токенов?`,
-                (confirmed) => {
+                async (confirmed) => {
                     if (confirmed) {
-                        // Здесь должен быть запрос к API бота для покупки билета
-                        tg.showAlert('Билет успешно приобретен!');
-                        // Перезагружаем данные
-                        loadPromotions();
+                        try {
+                            // Определяем URL API
+                            let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                            const apiUrl = `${apiBaseUrl}/api/promotions/${userId}/buy-ticket`;
+                            
+                            // Получаем initData для проверки подлинности (опционально)
+                            const initData = tg.initData || '';
+                            
+                            // Запрос к API
+                            const response = await fetch(apiUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-Init-Data': initData,
+                                },
+                                body: JSON.stringify({
+                                    giveaway_id: promotionId,
+                                }),
+                            });
+                            
+                            if (!response.ok) {
+                                const errorData = await response.json();
+                                throw new Error(errorData.detail || 'Ошибка при покупке билета');
+                            }
+                            
+                            const data = await response.json();
+                            
+                            tg.showAlert(data.message || 'Билет успешно приобретен!');
+                            
+                            // Перезагружаем данные
+                            loadPromotions();
+                        } catch (error) {
+                            console.error('Ошибка покупки билета:', error);
+                            tg.showAlert(error.message || 'Не удалось купить билет. Попробуйте позже.');
+                        }
                     }
                 }
             );

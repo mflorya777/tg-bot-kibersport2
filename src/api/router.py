@@ -1,8 +1,15 @@
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
+import datetime as dt
 
 from src.clients.mongo import MongoClient
+from src.models.mongo_models import (
+    GiveawayStatus,
+    GiveawayParticipationType,
+    TransactionType,
+    MOSCOW_TZ,
+)
 
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -97,4 +104,250 @@ async def get_profile(
         raise HTTPException(
             status_code=500,
             detail=f"Ошибка при получении профиля: {str(e)}",
+        )
+
+
+class PromotionItem(BaseModel):
+    """Модель элемента розыгрыша для ответа."""
+    id: str
+    name: str
+    description: str
+    start_date: str  # ISO format
+    end_date: str  # ISO format
+    participation_type: str  # "tokens" or "condition"
+    ticket_cost: Optional[int] = None
+    condition_description: Optional[str] = None
+    ticket_limit_per_user: Optional[int] = None
+    status: str  # "draft", "active", "completed"
+    user_tickets: int = 0
+    winners: Optional[List[dict]] = None
+
+
+class PromotionsResponse(BaseModel):
+    """Модель ответа для списка розыгрышей."""
+    promotions: List[PromotionItem]
+
+
+class BuyTicketRequest(BaseModel):
+    """Модель запроса на покупку билета."""
+    giveaway_id: str
+
+
+class BuyTicketResponse(BaseModel):
+    """Модель ответа на покупку билета."""
+    success: bool
+    message: str
+    new_balance: int
+    tickets_count: int
+
+
+@router.get("/promotions/{user_id}")
+async def get_promotions(
+    user_id: int,
+    x_init_data: Optional[str] = Header(None, alias="X-Init-Data"),
+) -> PromotionsResponse:
+    """
+    Получает список активных розыгрышей с информацией о билетах пользователя.
+    
+    Args:
+        user_id: Telegram user_id пользователя
+        x_init_data: InitData из Telegram WebApp (для проверки подлинности, опционально)
+    
+    Returns:
+        Список розыгрышей с информацией о билетах пользователя
+    
+    Raises:
+        HTTPException: Если произошла ошибка
+    """
+    if _mongo_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="База данных недоступна",
+        )
+    
+    try:
+        # Получаем все розыгрыши
+        giveaways = await _mongo_client.get_giveaways()
+        
+        # Фильтруем только активные и завершенные (не черновики)
+        active_giveaways = [
+            g for g in giveaways
+            if g.status in (GiveawayStatus.ACTIVE, GiveawayStatus.COMPLETED)
+        ]
+        
+        # Формируем ответ с информацией о билетах пользователя
+        promotions = []
+        for giveaway in active_giveaways:
+            # Получаем количество билетов пользователя
+            user_tickets = giveaway.participants.get(user_id, 0)
+            
+            # Формируем список победителей с именами
+            winners_list = None
+            if giveaway.winners:
+                winners_list = []
+                for winner_id in giveaway.winners:
+                    winner_user = await _mongo_client.get_user(winner_id)
+                    if winner_user:
+                        winner_name = winner_user.nickname or winner_user.name or f"ID: {winner_id}"
+                        winners_list.append({
+                            "id": winner_id,
+                            "name": winner_name,
+                        })
+                    else:
+                        winners_list.append({
+                            "id": winner_id,
+                            "name": f"ID: {winner_id}",
+                        })
+            
+            promotions.append(PromotionItem(
+                id=giveaway.id,
+                name=giveaway.name,
+                description=giveaway.description,
+                start_date=giveaway.start_date.isoformat(),
+                end_date=giveaway.end_date.isoformat(),
+                participation_type=giveaway.participation_type.value,
+                ticket_cost=giveaway.ticket_cost,
+                condition_description=giveaway.condition_description,
+                ticket_limit_per_user=giveaway.ticket_limit_per_user,
+                status=giveaway.status.value,
+                user_tickets=user_tickets,
+                winners=winners_list,
+            ))
+        
+        return PromotionsResponse(promotions=promotions)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении розыгрышей: {str(e)}",
+        )
+
+
+@router.post("/promotions/{user_id}/buy-ticket")
+async def buy_ticket(
+    user_id: int,
+    request: BuyTicketRequest,
+    x_init_data: Optional[str] = Header(None, alias="X-Init-Data"),
+) -> BuyTicketResponse:
+    """
+    Покупает билет на розыгрыш.
+    
+    Args:
+        user_id: Telegram user_id пользователя
+        request: Запрос с ID розыгрыша
+        x_init_data: InitData из Telegram WebApp (для проверки подлинности, опционально)
+    
+    Returns:
+        Результат покупки билета
+    
+    Raises:
+        HTTPException: Если произошла ошибка
+    """
+    if _mongo_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="База данных недоступна",
+        )
+    
+    try:
+        # Получаем розыгрыш
+        giveaway = await _mongo_client.get_giveaway(request.giveaway_id)
+        if not giveaway:
+            raise HTTPException(
+                status_code=404,
+                detail="Розыгрыш не найден",
+            )
+        
+        # Проверяем, что розыгрыш активен
+        if giveaway.status != GiveawayStatus.ACTIVE:
+            raise HTTPException(
+                status_code=400,
+                detail="Розыгрыш не активен",
+            )
+        
+        # Проверяем, что розыгрыш еще не закончился
+        now = dt.datetime.now(tz=MOSCOW_TZ)
+        if giveaway.end_date < now:
+            raise HTTPException(
+                status_code=400,
+                detail="Розыгрыш уже завершен",
+            )
+        
+        # Проверяем тип участия
+        if giveaway.participation_type != GiveawayParticipationType.TOKENS:
+            raise HTTPException(
+                status_code=400,
+                detail="Этот розыгрыш не требует покупки билетов",
+            )
+        
+        if not giveaway.ticket_cost:
+            raise HTTPException(
+                status_code=400,
+                detail="Стоимость билета не указана",
+            )
+        
+        # Получаем пользователя
+        user = await _mongo_client.get_user(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail="Пользователь не найден",
+            )
+        
+        # Проверяем баланс
+        if user.balance < giveaway.ticket_cost:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Недостаточно CD токенов. Требуется: {giveaway.ticket_cost}, доступно: {user.balance}",
+            )
+        
+        # Проверяем лимит билетов
+        current_tickets = giveaway.participants.get(user_id, 0)
+        if giveaway.ticket_limit_per_user and current_tickets >= giveaway.ticket_limit_per_user:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Достигнут лимит билетов: {giveaway.ticket_limit_per_user}",
+            )
+        
+        # Списываем токены
+        await _mongo_client.add_transaction(
+            user_id=user_id,
+            transaction_type=TransactionType.WITHDRAWAL,
+            amount=giveaway.ticket_cost,
+            description=f"Покупка билета на розыгрыш '{giveaway.name}'",
+        )
+        
+        # Добавляем билет пользователю
+        giveaways_collection = _mongo_client.db["giveaways"]
+        new_ticket_count = current_tickets + 1
+        
+        # Обновляем участников
+        participants = giveaway.participants.copy()
+        participants[user_id] = new_ticket_count
+        
+        await giveaways_collection.update_one(
+            {"id": request.giveaway_id},
+            {"$set": {
+                "participants": participants,
+                "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+            }},
+        )
+        
+        # Получаем обновленный баланс
+        updated_user = await _mongo_client.get_user(user_id)
+        new_balance = updated_user.balance if updated_user else 0
+        
+        return BuyTicketResponse(
+            success=True,
+            message=f"Билет успешно приобретен за {giveaway.ticket_cost} CD токенов",
+            new_balance=new_balance,
+            tickets_count=new_ticket_count,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при покупке билета: {str(e)}",
         )
