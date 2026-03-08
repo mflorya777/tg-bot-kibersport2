@@ -1357,12 +1357,17 @@ class MongoClient:
             
             existing = await tournament_results_collection.find_one(query)
             
+            # Для соло турниров: очки игрока = количество киллов
+            # Для командных турниров: очки рассчитываются по формуле (сумма/топ-N/среднее)
+            total_points = total_kills if is_solo else 0
+            
             if existing:
                 # Обновляем существующий результат
                 await tournament_results_collection.update_one(
                     query,
                     {"$set": {
                         "total_kills": total_kills,
+                        "total_points": total_points,
                         "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
                     }},
                 )
@@ -1374,6 +1379,7 @@ class MongoClient:
                     player_id=int(participant_id) if is_solo else None,
                     team_id=str(participant_id) if not is_solo else None,
                     total_kills=total_kills,
+                    total_points=total_points,
                 )
                 await tournament_results_collection.insert_one(result.model_dump())
             
@@ -1462,11 +1468,18 @@ class MongoClient:
                     query["team_id"] = team_id
                 
                 existing = await tournament_results_collection.find_one(query)
+                
+                # Для соло турниров: очки игрока = количество киллов
+                # Для командных турниров: очки рассчитываются по формуле (сумма/топ-N/среднее)
+                is_solo = player_id is not None
+                total_points = total_kills if is_solo else 0
+                
                 if existing:
                     await tournament_results_collection.update_one(
                         query,
                         {"$set": {
                             "total_kills": total_kills,
+                            "total_points": total_points,
                             "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
                         }},
                     )
@@ -1479,6 +1492,7 @@ class MongoClient:
                         player_id=player_id,
                         team_id=team_id,
                         total_kills=total_kills,
+                        total_points=total_points,
                     )
                     await tournament_results_collection.insert_one(result.model_dump())
             
