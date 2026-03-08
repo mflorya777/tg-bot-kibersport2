@@ -26,6 +26,7 @@ from src.models.mongo_models import (
     GiveawayParticipationType,
     ActionLog,
     ActionType,
+    ReferralSettings,
 )
 from src.models.user_roles import UserRole
 
@@ -2121,4 +2122,71 @@ class MongoClient:
             return TournamentResult(**doc)
         except Exception as e:
             _LOG.error(f"Ошибка при получении результата турнира: {e}")
+            return None
+
+    async def get_referral_settings(
+        self,
+    ) -> Optional[ReferralSettings]:
+        """
+        Получает настройки реферальной системы.
+        
+        Returns:
+            Настройки рефералки или None
+        """
+        try:
+            settings_collection = self.db["settings"]
+            doc = await settings_collection.find_one({"id": "referral_settings"})
+            if not doc:
+                # Создаем настройки по умолчанию
+                default_settings = ReferralSettings()
+                await settings_collection.insert_one(default_settings.model_dump())
+                return default_settings
+            return ReferralSettings(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении настроек рефералки: {e}")
+            return None
+    
+    async def update_referral_settings(
+        self,
+        bonus_per_referral: Optional[int] = None,
+        referral_condition: Optional[str] = None,
+        anti_fraud_rule: Optional[str] = None,
+    ) -> Optional[ReferralSettings]:
+        """
+        Обновляет настройки реферальной системы.
+        
+        Args:
+            bonus_per_referral: Количество токенов за приглашённого
+            referral_condition: Условие засчитывания приглашения
+            anti_fraud_rule: Правило защиты от накрутки
+        
+        Returns:
+            Обновленные настройки или None
+        """
+        try:
+            settings_collection = self.db["settings"]
+            update_data = {
+                "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+            }
+            
+            if bonus_per_referral is not None:
+                update_data["bonus_per_referral"] = bonus_per_referral
+            if referral_condition is not None:
+                update_data["referral_condition"] = referral_condition
+            if anti_fraud_rule is not None:
+                update_data["anti_fraud_rule"] = anti_fraud_rule
+            
+            await settings_collection.update_one(
+                {"id": "referral_settings"},
+                {"$set": update_data},
+                upsert=True,
+            )
+            
+            # Получаем обновленные настройки
+            doc = await settings_collection.find_one({"id": "referral_settings"})
+            if doc:
+                return ReferralSettings(**doc)
+            return None
+        except Exception as e:
+            _LOG.error(f"Ошибка при обновлении настроек рефералки: {e}")
             return None

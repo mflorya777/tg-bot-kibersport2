@@ -3253,11 +3253,44 @@ async def admin_callback_handler(
                     _LOG.error(f"Ошибка при получении розыгрыша: {e}")
                     await callback.answer("Произошла ошибка", show_alert=True)
     elif callback_data == "admin_referral":
+        # Проверка прав: только SUPER_ADMIN может настраивать рефералку
+        if user_role != UserRole.SUPER_ADMIN:
+            await callback.answer(
+                "❌ Доступно только супер-админам",
+                show_alert=True,
+            )
+            return
+        
         await callback.answer("Рефералка")
+        # Открываем мини-приложение для настройки рефералки
+        from src.config import MINI_APP_URL
+        
+        # Формируем URL для страницы настроек рефералки
+        base_url = MINI_APP_URL.rstrip('/')
+        if '/profile' in base_url:
+            base_url = base_url.replace('/profile', '')
+        elif base_url.endswith('/index.html'):
+            base_url = base_url.replace('/index.html', '')
+        referral_settings_url = f"{base_url}/referral_settings.html"
+        
         await callback.message.edit_text(
-            text="🤝 Рефералка\n\nРаздел в разработке...",
-            reply_markup=get_admin_panel_keyboard(
-                is_super_admin=is_super_admin,
+            text="🤝 Настройки рефералки\n\n"
+                 "Нажмите на кнопку ниже, чтобы открыть настройки:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="⚙️ Открыть настройки",
+                            web_app=types.WebAppInfo(url=referral_settings_url),
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="⬅️ Назад",
+                            callback_data="menu_admin",
+                        ),
+                    ],
+                ],
             ),
         )
     elif callback_data == "admin_broadcast":

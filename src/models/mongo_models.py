@@ -704,3 +704,29 @@ class ActionLog(BaseModel):
         default_factory=lambda: dt.datetime.now(tz=MOSCOW_TZ),
         description="Дата и время действия",
     )
+
+
+class ReferralSettings(BaseModel):
+    """
+    Настройки реферальной системы.
+    """
+    id: str = Field(
+        default="referral_settings",
+        description="Уникальный ID настроек (всегда один)",
+    )
+    bonus_per_referral: int = Field(
+        default=50,
+        description="Сколько токенов даём за приглашённого",
+    )
+    referral_condition: str = Field(
+        default="registration",
+        description="Когда считаем приглашение засчитанным (registration/tournament)",
+    )
+    anti_fraud_rule: str = Field(
+        default="one_account_one_device",
+        description="Правило защиты от накрутки",
+    )
+    updated_at: Optional[dt.datetime] = Field(
+        None,
+        description="Дата последнего обновления",
+    )
