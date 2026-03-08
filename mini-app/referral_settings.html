@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <!-- URL API сервера (автоматически обновляется скриптом get_ngrok_url.py) -->
+    <meta name="api-base-url" content="">
     <title>Настройки рефералки - Kibersport</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -260,13 +262,42 @@
         // Получение данных пользователя из Telegram
         const user = tg.initDataUnsafe?.user || {};
         const userId = user.id;
+        
+        // Логируем данные пользователя для отладки
+        console.log('Данные пользователя из Telegram:', user);
+        console.log('userId:', userId);
+
+        // Определяем URL API
+        // Для локальной разработки можно использовать ngrok или указать localhost
+        // Для продакшена нужно указать публичный URL API сервера
+        // Примеры:
+        // - Локально через ngrok: 'https://your-ngrok-url.ngrok.io'
+        // - Публичный сервер: 'https://api.yourdomain.com'
+        // - Локально (только для тестирования в браузере): 'http://localhost:8000'
+        const API_BASE_URL = window.API_BASE_URL || (() => {
+            // Пытаемся получить из meta-тега
+            const metaTag = document.querySelector('meta[name="api-base-url"]');
+            if (metaTag && metaTag.content) {
+                return metaTag.content;
+            }
+            // По умолчанию используем origin (если API на том же домене)
+            return window.location.origin.replace(/\/$/, '');
+        })();
 
         // Загрузка настроек
         async function loadSettings() {
             try {
-                // Определяем URL API
-                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
-                const apiUrl = `${apiBaseUrl}/api/referral-settings/${userId}`;
+                // Проверяем, что userId получен
+                if (!userId) {
+                    console.error('userId не получен из Telegram');
+                    showError('Не удалось определить пользователя. Убедитесь, что вы открыли мини-приложение через Telegram.');
+                    return;
+                }
+                
+                const apiUrl = `${API_BASE_URL}/api/referral-settings/${userId}`;
+                
+                console.log('Запрос к API:', apiUrl);
+                console.log('userId:', userId);
                 
                 // Получаем initData для проверки подлинности (опционально)
                 const initData = tg.initData || '';
@@ -280,12 +311,33 @@
                     },
                 });
                 
+                console.log('Статус ответа:', response.status);
+                
                 if (!response.ok) {
+                    let errorMessage = `Ошибка ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        errorMessage = errorData.detail || errorMessage;
+                        console.error('Детали ошибки:', errorData);
+                    } catch (e) {
+                        const errorText = await response.text();
+                        console.error('Текст ошибки:', errorText);
+                        errorMessage = errorText || errorMessage;
+                    }
+                    
                     if (response.status === 403) {
                         showError('Доступ запрещен. Только супер-админы могут просматривать настройки рефералки.');
                         return;
+                    } else if (response.status === 404) {
+                        showError('Пользователь не найден в базе данных.');
+                        return;
+                    } else if (response.status === 503) {
+                        showError('База данных недоступна. Попробуйте позже.');
+                        return;
                     }
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    
+                    showError(`Ошибка загрузки: ${errorMessage}`);
+                    return;
                 }
                 
                 const settingsData = await response.json();
@@ -296,7 +348,19 @@
                 displaySettings(settingsData);
             } catch (error) {
                 console.error('Ошибка загрузки настроек:', error);
-                showError('Не удалось загрузить настройки. Попробуйте позже.');
+                console.error('Тип ошибки:', error.constructor.name);
+                console.error('Сообщение ошибки:', error.message);
+                console.error('Стек ошибки:', error.stack);
+                
+                let errorMessage = 'Не удалось загрузить настройки. Попробуйте позже.';
+                
+                if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                    errorMessage = 'Не удалось подключиться к серверу. Проверьте, что API сервер запущен и доступен.';
+                } else if (error.message) {
+                    errorMessage = `Ошибка: ${error.message}`;
+                }
+                
+                showError(errorMessage);
             }
         }
 
@@ -327,9 +391,7 @@
             };
 
             try {
-                // Определяем URL API
-                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
-                const apiUrl = `${apiBaseUrl}/api/referral-settings/${userId}`;
+                const apiUrl = `${API_BASE_URL}/api/referral-settings/${userId}`;
                 
                 // Получаем initData для проверки подлинности (опционально)
                 const initData = tg.initData || '';

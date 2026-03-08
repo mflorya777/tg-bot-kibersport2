@@ -171,3 +171,8 @@ files_storage_directory
 .nicegui
 docker-compose.to_deploy.yaml
 *.DS_Store
+
+# ngrok
+.ngrok_url
+.ngrok_pid
+/tmp/ngrok.log

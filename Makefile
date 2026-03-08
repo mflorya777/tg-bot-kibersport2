@@ -301,3 +301,19 @@ ps:  ## Посмотреть контейнеры проекта
 
 logs:  ## Логи всех сервисов
 	docker compose -f compose/docker-compose.$(ENV).yaml logs -f
+
+# ngrok команды
+ngrok_start:  ## Запустить ngrok туннель для API (порт 8000)
+	@./scripts/start_ngrok.sh
+
+ngrok_url:  ## Получить текущий ngrok URL и обновить мини-приложения
+	@python3 scripts/get_ngrok_url.py
+
+ngrok_stop:  ## Остановить ngrok туннель
+	@if [ -f .ngrok_pid ]; then \
+		kill $$(cat .ngrok_pid) 2>/dev/null || true; \
+		rm -f .ngrok_url .ngrok_pid; \
+		echo "✅ ngrok остановлен"; \
+	else \
+		echo "⚠️  ngrok не запущен"; \
+	fi
