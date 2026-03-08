@@ -1214,10 +1214,35 @@ async def callback_handler(
         )
     elif callback_data == "menu_promotions":
         await callback.answer("Акции и розыгрыши")
+        # Открываем мини-приложение для акций и розыгрышей
+        from src.config import MINI_APP_URL
+        
+        # Формируем URL для страницы розыгрышей
+        base_url = MINI_APP_URL.rstrip('/')
+        if '/profile' in base_url:
+            base_url = base_url.replace('/profile', '')
+        elif base_url.endswith('/index.html'):
+            base_url = base_url.replace('/index.html', '')
+        promotions_url = f"{base_url}/promotions.html"
+        
         await callback.message.edit_text(
-            text="🎉 Акции и розыгрыши\n\nРаздел в разработке...",
-            reply_markup=get_main_menu_keyboard(
-                show_admin=show_admin,
+            text="🎉 Акции и розыгрыши\n\n"
+                 "Нажмите на кнопку ниже, чтобы открыть розыгрыши:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🎉 Открыть розыгрыши",
+                            web_app=types.WebAppInfo(url=promotions_url),
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="⬅️ Назад",
+                            callback_data="menu_back",
+                        ),
+                    ],
+                ],
             ),
         )
     elif callback_data == "bonus_daily_claim":
