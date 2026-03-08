@@ -286,6 +286,9 @@
                 
                 const profileData = await response.json();
                 
+                // Логируем полученные данные для отладки
+                console.log('Данные профиля из API:', profileData);
+                
                 // Формируем название команды (если есть)
                 let teamDisplayName = null;
                 if (profileData.team_name && profileData.team_tag) {
