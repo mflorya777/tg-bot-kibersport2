@@ -391,6 +391,7 @@ def get_tournament_card_keyboard(
     tournament_id: str,
     tournament_status: str,
     is_participant: bool = False,
+    results_published: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Создает инлайн-клавиатуру для карточки турнира.
@@ -399,6 +400,7 @@ def get_tournament_card_keyboard(
         tournament_id: ID турнира
         tournament_status: Статус турнира
         is_participant: Участвует ли пользователь в турнире
+        results_published: Опубликованы ли результаты турнира
     """
     keyboard_rows = []
     
@@ -422,11 +424,11 @@ def get_tournament_card_keyboard(
         ),
     ])
     
-    # Кнопка таблицы результатов (только если турнир идёт или завершён)
-    if tournament_status in ("in_progress", "completed"):
+    # Кнопка таблицы результатов (только если результаты опубликованы)
+    if results_published:
         keyboard_rows.append([
             InlineKeyboardButton(
-                text="📊 Таблица результатов",
+                text="📊 Результаты",
                 callback_data=f"tournament_results_{tournament_id}",
             ),
         ])
@@ -1935,5 +1937,86 @@ def get_admin_actions_log_keyboard(
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_tournament_results_keyboard(
+    tournament_id: str,
+    is_participant: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для просмотра результатов турнира пользователем.
+    
+    Args:
+        tournament_id: ID турнира
+        is_participant: Участвует ли пользователь в турнире
+    """
+    keyboard_rows = []
+    
+    if is_participant:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="💀 Твои киллы по матчам",
+                callback_data=f"tournament_results_matches_{tournament_id}",
+            ),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="🏆 Итог турнира",
+                callback_data=f"tournament_results_final_{tournament_id}",
+            ),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="👥 Очки команды",
+                callback_data=f"tournament_results_team_{tournament_id}",
+            ),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text="⚠️ Оспорить результат",
+                callback_data=f"tournament_results_dispute_{tournament_id}",
+            ),
+        ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="📊 Общая таблица",
+            callback_data=f"tournament_results_table_{tournament_id}",
+        ),
+    ])
+    
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data=f"tournament_card_{tournament_id}",
+        ),
+    ])
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=keyboard_rows,
+    )
+    return keyboard
+
+
+def get_tournament_results_dispute_keyboard(
+    tournament_id: str,
+) -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для оспаривания результатов.
+    
+    Args:
+        tournament_id: ID турнира
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data=f"tournament_results_{tournament_id}",
+                ),
+            ],
+        ],
     )
     return keyboard

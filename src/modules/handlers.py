@@ -56,6 +56,8 @@ from src.modules.keyboards import (
     get_admin_broadcast_tournaments_keyboard,
     get_admin_broadcast_preview_keyboard,
     get_admin_actions_log_keyboard,
+    get_tournament_results_keyboard,
+    get_tournament_results_dispute_keyboard,
 )
 from src.models.user_roles import UserRole
 from src.models.mongo_models import (
@@ -116,6 +118,9 @@ _waiting_giveaway_data: dict[int, dict] = {}
 
 # Словарь для хранения состояния создания рассылки
 _waiting_broadcast_data: dict[int, dict] = {}
+
+# Словарь для хранения состояния оспаривания результатов
+_waiting_results_dispute: dict[int, dict] = {}
 
 # Словарь для хранения состояния ожидания суммы токенов для начисления/списания
 _waiting_token_amount: dict[int, dict] = {}
@@ -1663,6 +1668,7 @@ async def callback_handler(
                 tournament_id=tournament_id,
                 tournament_status=tournament.status.value,
                 is_participant=is_participant,
+                results_published=tournament.results_published,
             ),
         )
     elif callback_data.startswith("tournament_join_"):
@@ -1874,11 +1880,12 @@ async def callback_handler(
             tournament_text = format_tournament_card(tournament, is_participant=is_participant)
             await callback.message.edit_text(
                 text=tournament_text,
-                reply_markup=get_tournament_card_keyboard(
-                    tournament_id=tournament_id,
-                    tournament_status=tournament.status.value,
-                    is_participant=is_participant,
-                ),
+            reply_markup=get_tournament_card_keyboard(
+                tournament_id=tournament_id,
+                tournament_status=tournament.status.value,
+                is_participant=is_participant,
+                results_published=tournament.results_published,
+            ),
             )
             
         except Exception as e:
@@ -5449,3 +5456,371 @@ async def _show_actions_log(
                  "❌ Ошибка подключения к базе данных.",
             reply_markup=get_admin_actions_log_keyboard(page=page, has_next=False),
         )
+
+
+async def _show_user_matches_results(
+    callback: types.CallbackQuery,
+    tournament_id: str,
+) -> None:
+    """
+    Показывает киллы пользователя по матчам.
+    
+    Args:
+        callback: Объект callback query
+        tournament_id: ID турнира
+    """
+    if _mongo_client is None:
+        await callback.answer("Ошибка: база данных недоступна", show_alert=True)
+        return
+    
+    try:
+        user_id = callback.from_user.id
+        tournament = await _mongo_client.get_tournament(tournament_id)
+        if not tournament:
+            await callback.answer("Турнир не найден", show_alert=True)
+            return
+        
+        # Получаем матчи турнира
+        matches = await _mongo_client.get_tournament_matches(tournament_id)
+        
+        if not matches:
+            await callback.message.edit_text(
+                text="💀 Твои киллы по матчам\n\n"
+                     "Матчи еще не созданы.",
+                reply_markup=get_tournament_results_keyboard(
+                    tournament_id=tournament_id,
+                    is_participant=True,
+                ),
+            )
+            return
+        
+        lines = ["💀 Твои киллы по матчам\n"]
+        
+        total_kills = 0
+        for match in matches:
+            # Получаем результат пользователя в матче
+            if tournament.format == TournamentFormat.SOLO:
+                match_results = await _mongo_client.get_match_results(match.id)
+                user_result = next((r for r in match_results if r.participant_id == user_id), None)
+                if user_result:
+                    kills = user_result.kills
+                    total_kills += kills
+                    lines.append(f"🎮 {match.name}: <b>{kills} киллов</b>")
+            else:
+                # Для командных турниров получаем результат команды
+                user = await _mongo_client.get_user(user_id)
+                if user and user.team_id:
+                    match_results = await _mongo_client.get_match_results(match.id)
+                    team_result = next((r for r in match_results if str(r.participant_id) == str(user.team_id)), None)
+                    if team_result:
+                        kills = team_result.kills
+                        total_kills += kills
+                        lines.append(f"🎮 {match.name}: <b>{kills} киллов</b>")
+        
+        if total_kills > 0:
+            lines.append(f"\n💀 Всего киллов: <b>{total_kills}</b>")
+        else:
+            lines.append("\n💀 Результаты по матчам пока не внесены")
+        
+        await callback.message.edit_text(
+            text="\n".join(lines),
+            reply_markup=get_tournament_results_keyboard(
+                tournament_id=tournament_id,
+                is_participant=True,
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        _LOG.error(f"Ошибка при получении результатов по матчам: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
+
+
+async def _show_user_final_result(
+    callback: types.CallbackQuery,
+    tournament_id: str,
+) -> None:
+    """
+    Показывает итоговый результат пользователя в турнире.
+    
+    Args:
+        callback: Объект callback query
+        tournament_id: ID турнира
+    """
+    if _mongo_client is None:
+        await callback.answer("Ошибка: база данных недоступна", show_alert=True)
+        return
+    
+    try:
+        user_id = callback.from_user.id
+        tournament = await _mongo_client.get_tournament(tournament_id)
+        if not tournament:
+            await callback.answer("Турнир не найден", show_alert=True)
+            return
+        
+        # Получаем итоговый результат
+        if tournament.format == TournamentFormat.SOLO:
+            result = await _mongo_client.get_tournament_result(tournament_id, user_id, is_team=False)
+        else:
+            user = await _mongo_client.get_user(user_id)
+            if not user or not user.team_id:
+                await callback.message.edit_text(
+                    text="🏆 Итог турнира\n\n"
+                         "Вы не состоите в команде.",
+                    reply_markup=get_tournament_results_keyboard(
+                        tournament_id=tournament_id,
+                        is_participant=True,
+                    ),
+                )
+                return
+            result = await _mongo_client.get_tournament_result(tournament_id, str(user.team_id), is_team=True)
+        
+        if not result:
+            await callback.message.edit_text(
+                text="🏆 Итог турнира\n\n"
+                     "Итоговый результат пока не определен.",
+                reply_markup=get_tournament_results_keyboard(
+                    tournament_id=tournament_id,
+                    is_participant=True,
+                ),
+            )
+            return
+        
+        lines = ["🏆 Итог турнира\n"]
+        lines.append(f"💀 Всего киллов: <b>{result.total_kills}</b>")
+        if result.total_points:
+            lines.append(f"📊 Всего очков: <b>{result.total_points}</b>")
+        if result.position:
+            lines.append(f"🏅 Место: <b>#{result.position}</b>")
+        
+        await callback.message.edit_text(
+            text="\n".join(lines),
+            reply_markup=get_tournament_results_keyboard(
+                tournament_id=tournament_id,
+                is_participant=True,
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        _LOG.error(f"Ошибка при получении итогового результата: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
+
+
+async def _show_user_team_results(
+    callback: types.CallbackQuery,
+    tournament_id: str,
+) -> None:
+    """
+    Показывает очки команды пользователя.
+    
+    Args:
+        callback: Объект callback query
+        tournament_id: ID турнира
+    """
+    if _mongo_client is None:
+        await callback.answer("Ошибка: база данных недоступна", show_alert=True)
+        return
+    
+    try:
+        user_id = callback.from_user.id
+        tournament = await _mongo_client.get_tournament(tournament_id)
+        if not tournament:
+            await callback.answer("Турнир не найден", show_alert=True)
+            return
+        
+        if tournament.format == TournamentFormat.SOLO:
+            await callback.message.edit_text(
+                text="👥 Очки команды\n\n"
+                     "Этот турнир проводится в формате соло.",
+                reply_markup=get_tournament_results_keyboard(
+                    tournament_id=tournament_id,
+                    is_participant=True,
+                ),
+            )
+            return
+        
+        user = await _mongo_client.get_user(user_id)
+        if not user or not user.team_id:
+            await callback.message.edit_text(
+                text="👥 Очки команды\n\n"
+                     "Вы не состоите в команде.",
+                reply_markup=get_tournament_results_keyboard(
+                    tournament_id=tournament_id,
+                    is_participant=True,
+                ),
+            )
+            return
+        
+        team = await _mongo_client.get_team(str(user.team_id))
+        if not team:
+            await callback.message.edit_text(
+                text="👥 Очки команды\n\n"
+                     "Команда не найдена.",
+                reply_markup=get_tournament_results_keyboard(
+                    tournament_id=tournament_id,
+                    is_participant=True,
+                ),
+            )
+            return
+        
+        # Получаем результат команды
+        result = await _mongo_client.get_tournament_result(tournament_id, str(user.team_id), is_team=True)
+        
+        lines = [f"👥 Очки команды: {team.name} ({team.tag})\n"]
+        
+        if result:
+            lines.append(f"💀 Всего киллов: <b>{result.total_kills}</b>")
+            if result.total_points:
+                lines.append(f"📊 Всего очков: <b>{result.total_points}</b>")
+            if result.position:
+                lines.append(f"🏅 Место: <b>#{result.position}</b>")
+        else:
+            lines.append("Результаты команды пока не определены")
+        
+        await callback.message.edit_text(
+            text="\n".join(lines),
+            reply_markup=get_tournament_results_keyboard(
+                tournament_id=tournament_id,
+                is_participant=True,
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        _LOG.error(f"Ошибка при получении результатов команды: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
+
+
+async def _show_tournament_results_table(
+    callback: types.CallbackQuery,
+    tournament_id: str,
+) -> None:
+    """
+    Показывает общую таблицу результатов турнира.
+    
+    Args:
+        callback: Объект callback query
+        tournament_id: ID турнира
+    """
+    if _mongo_client is None:
+        await callback.answer("Ошибка: база данных недоступна", show_alert=True)
+        return
+    
+    try:
+        tournament = await _mongo_client.get_tournament(tournament_id)
+        if not tournament:
+            await callback.answer("Турнир не найден", show_alert=True)
+            return
+        
+        results = await _mongo_client.get_tournament_results(tournament_id)
+        
+        if not results:
+            await callback.message.edit_text(
+                text="📊 Общая таблица результатов\n\n"
+                     "Результаты пока не определены.",
+                reply_markup=get_tournament_results_keyboard(
+                    tournament_id=tournament_id,
+                    is_participant=False,
+                ),
+            )
+            return
+        
+        # Сортируем по позиции
+        results.sort(key=lambda x: x.position if x.position else 999)
+        
+        lines = ["📊 Общая таблица результатов\n"]
+        lines.append("🏅 Место | Участник | Киллы | Очки")
+        lines.append("─" * 40)
+        
+        for result in results[:20]:  # Показываем топ-20
+            participant_name = await _get_participant_name(tournament, result.participant_id)
+            position = f"#{result.position}" if result.position else "—"
+            kills = result.total_kills or 0
+            points = result.total_points or 0
+            lines.append(f"{position} | {participant_name} | {kills} | {points}")
+        
+        if len(results) > 20:
+            lines.append(f"\n... и еще {len(results) - 20} участников")
+        
+        await callback.message.edit_text(
+            text="\n".join(lines),
+            reply_markup=get_tournament_results_keyboard(
+                tournament_id=tournament_id,
+                is_participant=False,
+            ),
+        )
+    except Exception as e:
+        _LOG.error(f"Ошибка при получении таблицы результатов: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
+
+
+async def results_dispute_message_handler(
+    message: types.Message,
+) -> None:
+    """
+    Обработчик сообщений для оспаривания результатов.
+    """
+    user_id = message.from_user.id
+    
+    if user_id not in _waiting_results_dispute:
+        return
+    
+    data = _waiting_results_dispute[user_id]
+    tournament_id = data.get("tournament_id")
+    
+    # Проверяем команду /cancel
+    if message.text and message.text.strip().lower() == "/cancel":
+        _waiting_results_dispute.pop(user_id, None)
+        await message.answer("❌ Оспаривание результата отменено.")
+        return
+    
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с причиной оспаривания.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    dispute_text = message.text.strip()
+    if not dispute_text:
+        await message.answer(
+            "❌ Текст оспаривания не может быть пустым.\n\n"
+            "Или отправьте /cancel для отмены.",
+        )
+        return
+    
+    # Отправляем в поддержку
+    if _mongo_client is not None:
+        try:
+            tournament = await _mongo_client.get_tournament(tournament_id)
+            tournament_name = tournament.name if tournament else f"ID: {tournament_id}"
+            
+            # Формируем сообщение для администратора поддержки
+            from src.config import SUPPORT_ADMIN_ID
+            dispute_message = (
+                f"⚠️ Оспаривание результата турнира\n\n"
+                f"🏆 Турнир: {tournament_name}\n"
+                f"👤 Пользователь: {message.from_user.full_name} (ID: {user_id})\n"
+                f"📝 Причина:\n{dispute_text}"
+            )
+            
+            # Отправляем администратору поддержки
+            from aiogram import Bot
+            bot = Bot.get_current()
+            await bot.send_message(
+                chat_id=SUPPORT_ADMIN_ID,
+                text=dispute_message,
+            )
+            
+            _waiting_results_dispute.pop(user_id, None)
+            await message.answer(
+                "✅ Ваше обращение отправлено в поддержку. "
+                "Мы рассмотрим его в ближайшее время.",
+                reply_markup=get_tournament_results_keyboard(
+                    tournament_id=tournament_id,
+                    is_participant=True,
+                ),
+            )
+        except Exception as e:
+            _LOG.error(f"Ошибка при отправке оспаривания: {e}")
+            await message.answer("❌ Произошла ошибка при отправке обращения. Попробуйте позже.")
+    else:
+        await message.answer("❌ Ошибка подключения к базе данных.")

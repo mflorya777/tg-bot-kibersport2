@@ -2063,3 +2063,62 @@ class MongoClient:
         except Exception as e:
             _LOG.error(f"Ошибка при получении журнала действий: {e}")
             return []
+
+    async def get_match_results(
+        self,
+        match_id: str,
+    ) -> list[MatchResult]:
+        """
+        Получает результаты матча.
+        
+        Args:
+            match_id: ID матча
+        
+        Returns:
+            Список результатов матча
+        """
+        try:
+            # Результаты матчей хранятся в коллекции matches в поле results
+            matches_collection = self.db["matches"]
+            match_doc = await matches_collection.find_one({"id": match_id})
+            if not match_doc or "results" not in match_doc:
+                return []
+            
+            results = []
+            for result_doc in match_doc["results"]:
+                results.append(MatchResult(**result_doc))
+            return results
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении результатов матча {match_id}: {e}")
+            return []
+    
+    async def get_tournament_result(
+        self,
+        tournament_id: str,
+        participant_id: str | int,
+        is_team: bool = False,
+    ) -> Optional[TournamentResult]:
+        """
+        Получает результат участника/команды в турнире.
+        
+        Args:
+            tournament_id: ID турнира
+            participant_id: ID участника (user_id или team_id)
+            is_team: Является ли участник командой
+        
+        Returns:
+            Результат турнира или None
+        """
+        try:
+            tournament_results_collection = self.db["tournament_results"]
+            doc = await tournament_results_collection.find_one({
+                "tournament_id": tournament_id,
+                "participant_id": str(participant_id),
+                "is_team": is_team,
+            })
+            if not doc:
+                return None
+            return TournamentResult(**doc)
+        except Exception as e:
+            _LOG.error(f"Ошибка при получении результата турнира: {e}")
+            return None

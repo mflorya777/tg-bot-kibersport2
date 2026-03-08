@@ -158,6 +158,14 @@ async def register_handlers(
             await admin_broadcast_message_handler(message)
             return
         
+        # Проверяем состояние оспаривания результатов
+        from src.modules.handlers import _waiting_results_dispute
+        if user_id in _waiting_results_dispute:
+            print(f"[DEBUG] >>> Вызываем results_dispute_message_handler для пользователя {user_id}")
+            from src.modules.handlers import results_dispute_message_handler
+            await results_dispute_message_handler(message)
+            return
+        
         # Если ни одно состояние не активно, ничего не делаем
         print(f"[DEBUG] >>> unified_message_handler: нет активных состояний для пользователя {user_id}")
     
