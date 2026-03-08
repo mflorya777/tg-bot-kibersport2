@@ -131,6 +131,83 @@ _waiting_promocode_data: dict[int, dict] = {}
 # Словарь для хранения состояния создания/редактирования причин транзакций
 _waiting_transaction_reason_data: dict[int, dict] = {}
 
+# Кэш для file_id фото турниров (чтобы не загружать каждый раз)
+_tournaments_photo_file_id: Optional[str] = None
+
+
+async def _edit_message_safe(
+    message: types.Message,
+    text: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+) -> None:
+    """
+    Безопасно редактирует сообщение, проверяя его тип.
+    Если сообщение содержит медиа (фото), удаляет его и отправляет новое текстовое.
+    
+    Args:
+        message: Сообщение для редактирования
+        text: Текст для отправки
+        reply_markup: Клавиатура (опционально)
+    """
+    try:
+        # Пытаемся отредактировать как текстовое сообщение
+        await message.edit_text(
+            text=text,
+            reply_markup=reply_markup,
+        )
+    except Exception:
+        # Если не получилось (например, сообщение с фото), удаляем и отправляем новое
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.answer(
+            text=text,
+            reply_markup=reply_markup,
+        )
+
+
+async def _edit_photo_message_safe(
+    message: types.Message,
+    photo_file_id: str,
+    caption: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+) -> None:
+    """
+    Безопасно редактирует сообщение с фото.
+    Если сообщение текстовое, удаляет его и отправляет новое с фото.
+    
+    Args:
+        message: Сообщение для редактирования
+        photo_file_id: file_id фото
+        caption: Подпись к фото
+        reply_markup: Клавиатура (опционально)
+    """
+    try:
+        from aiogram.types import InputMediaPhoto
+        
+        # Пытаемся отредактировать медиа
+        await message.edit_media(
+            media=InputMediaPhoto(
+                media=photo_file_id,
+                caption=caption,
+            ),
+            reply_markup=reply_markup,
+        )
+    except Exception:
+        # Если не получилось (например, текстовое сообщение), удаляем и отправляем новое
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from aiogram.types import InputFile
+        photo = InputFile.from_file_id(photo_file_id)
+        await message.answer_photo(
+            photo=photo,
+            caption=caption,
+            reply_markup=reply_markup,
+        )
+
 
 def generate_team_id() -> str:
     """
@@ -819,6 +896,16 @@ def format_tournament_card(
     }
     lines.append(f"\n📊 Статус: {status_text.get(tournament.status, tournament.status.value)}")
     
+    # Формула подсчёта очков команды (только для командных турниров)
+    if tournament.format == TournamentFormat.TEAM and tournament.scoring_formula:
+        scoring_texts = {
+            "sum": "Сумма киллов всех игроков команды",
+            "topn": f"Топ-{tournament.top_n_count or 'N'} игроков команды",
+            "avg": "Среднее по игрокам",
+        }
+        formula_text = scoring_texts.get(tournament.scoring_formula, tournament.scoring_formula)
+        lines.append(f"📊 Формула подсчёта: {formula_text}")
+    
     # Короткие правила
     if tournament.rules_summary:
         lines.append(f"\n📝 Правила подсчёта:\n{tournament.rules_summary}")
@@ -949,6 +1036,7 @@ async def callback_handler(
     """
     Обработчик нажатий на инлайн-кнопки главного меню.
     """
+    global _tournaments_photo_file_id
     callback_data = callback.data
     user_role = await get_user_role(
         callback.from_user.id,
@@ -1030,13 +1118,71 @@ async def callback_handler(
                 )
         
         tournaments_text = format_tournaments_list(tournaments)
-        await callback.message.edit_text(
-            text=tournaments_text,
-            reply_markup=get_tournaments_list_keyboard(
-                current_filter="all",
-                available_games=available_games,
-            ),
-        )
+        
+        # Отправляем фото с подписью (используем кэш file_id если есть)
+        try:
+            from aiogram.types import FSInputFile, InputFile
+            from pathlib import Path
+            
+            # Если file_id уже есть в кэше, используем его (быстро)
+            if _tournaments_photo_file_id:
+                # Используем кэшированный file_id
+                await _edit_photo_message_safe(
+                    callback.message,
+                    photo_file_id=_tournaments_photo_file_id,
+                    caption=tournaments_text,
+                    reply_markup=get_tournaments_list_keyboard(
+                        current_filter="all",
+                        available_games=available_games,
+                    ),
+                )
+            else:
+                # Первая загрузка - загружаем файл
+                project_root = Path(__file__).parent.parent.parent
+                photo_path = project_root / "static" / "tournir_image.jpg"
+                
+                if photo_path.exists():
+                    photo = FSInputFile(str(photo_path))
+                    # Отправляем фото
+                    sent_message = await callback.message.answer_photo(
+                        photo=photo,
+                        caption=tournaments_text,
+                        reply_markup=get_tournaments_list_keyboard(
+                            current_filter="all",
+                            available_games=available_games,
+                        ),
+                    )
+                    
+                    # Сохраняем file_id в кэш для следующих раз
+                    if sent_message.photo and not _tournaments_photo_file_id:
+                        _tournaments_photo_file_id = sent_message.photo[-1].file_id
+                    
+                    # Удаляем предыдущее сообщение, если оно было
+                    try:
+                        await callback.message.delete()
+                    except Exception:
+                        pass
+                else:
+                    # Если фото не найдено, отправляем текст как обычно
+                    await _edit_message_safe(
+                        callback.message,
+                        text=tournaments_text,
+                        reply_markup=get_tournaments_list_keyboard(
+                            current_filter="all",
+                            available_games=available_games,
+                        ),
+                    )
+        except Exception as e:
+            _LOG.error(f"Ошибка при отправке фото турниров: {e}")
+            # В случае ошибки отправляем текст как обычно
+            await _edit_message_safe(
+                callback.message,
+                text=tournaments_text,
+                reply_markup=get_tournaments_list_keyboard(
+                    current_filter="all",
+                    available_games=available_games,
+                ),
+            )
     elif callback_data == "menu_ratings" or callback_data == "ratings_type":
         await callback.answer("Рейтинги")
         await callback.message.edit_text(
@@ -1631,14 +1777,30 @@ async def callback_handler(
                 )
         
         tournaments_text = format_tournaments_list(tournaments)
-        await callback.message.edit_text(
-            text=tournaments_text,
-            reply_markup=get_tournaments_list_keyboard(
-                tournaments=tournaments,
-                current_filter="all",
-                available_games=available_games,
-            ),
-        )
+        # Используем безопасное редактирование с учетом кэша фото
+        if _tournaments_photo_file_id:
+            # Если есть кэш фото, редактируем медиа-сообщение
+            await _edit_photo_message_safe(
+                callback.message,
+                photo_file_id=_tournaments_photo_file_id,
+                caption=tournaments_text,
+                reply_markup=get_tournaments_list_keyboard(
+                    tournaments=tournaments,
+                    current_filter="all",
+                    available_games=available_games,
+                ),
+            )
+        else:
+            # Если нет фото, редактируем как текстовое
+            await _edit_message_safe(
+                callback.message,
+                text=tournaments_text,
+                reply_markup=get_tournaments_list_keyboard(
+                    tournaments=tournaments,
+                    current_filter="all",
+                    available_games=available_games,
+                ),
+            )
     elif callback_data.startswith("tournaments_filter_"):
         # Обработка фильтров турниров
         filter_type = callback_data.replace("tournaments_filter_", "")
@@ -1676,15 +1838,33 @@ async def callback_handler(
         
         tournaments_text = format_tournaments_list(tournaments)
         current_filter = filter_type if not filter_type.startswith("game_") else "all"
-        await callback.message.edit_text(
-            text=tournaments_text,
-            reply_markup=get_tournaments_list_keyboard(
-                tournaments=tournaments,
-                current_filter=current_filter,
-                current_game=game_filter,
-                available_games=available_games,
-            ),
-        )
+        
+        # Используем безопасное редактирование с учетом кэша фото
+        if _tournaments_photo_file_id:
+            # Если есть кэш фото, редактируем медиа-сообщение
+            await _edit_photo_message_safe(
+                callback.message,
+                photo_file_id=_tournaments_photo_file_id,
+                caption=tournaments_text,
+                reply_markup=get_tournaments_list_keyboard(
+                    tournaments=tournaments,
+                    current_filter=current_filter,
+                    current_game=game_filter,
+                    available_games=available_games,
+                ),
+            )
+        else:
+            # Если нет фото, редактируем как текстовое
+            await _edit_message_safe(
+                callback.message,
+                text=tournaments_text,
+                reply_markup=get_tournaments_list_keyboard(
+                    tournaments=tournaments,
+                    current_filter=current_filter,
+                    current_game=game_filter,
+                    available_games=available_games,
+                ),
+            )
     elif callback_data.startswith("tournament_view_"):
         # Просмотр карточки турнира
         tournament_id = callback_data.replace("tournament_view_", "")
@@ -1715,7 +1895,9 @@ async def callback_handler(
             return
         
         tournament_text = format_tournament_card(tournament, is_participant)
-        await callback.message.edit_text(
+        # Используем безопасное редактирование (может быть сообщение с фото)
+        await _edit_message_safe(
+            callback.message,
             text=tournament_text,
             reply_markup=get_tournament_card_keyboard(
                 tournament_id=tournament_id,
@@ -2090,7 +2272,9 @@ async def callback_handler(
         )
     elif callback_data == "menu_back":
         await callback.answer("Главное меню")
-        await callback.message.edit_text(
+        # Используем безопасное редактирование (может быть сообщение с фото)
+        await _edit_message_safe(
+            callback.message,
             text="Главное меню",
             reply_markup=get_main_menu_keyboard(
                 show_admin=show_admin,
@@ -3663,12 +3847,12 @@ async def admin_callback_handler(
             )
         elif callback_data == "tournament_create_scoring_topn":
             data["scoring_formula"] = "topn"
-            creation_data["step"] = "join_type"
+            creation_data["step"] = "top_n_count"
             await callback.message.edit_text(
                 text="🏆 Создание турнира\n\n"
-                     "Шаг 9/9: Кто может вступать\n\n"
-                     "Выберите тип вступления:",
-                reply_markup=get_tournament_join_type_keyboard(),
+                     "Шаг 6.1/9: Количество игроков для топ-N\n\n"
+                     "Введите количество игроков (например, 3 для топ-3):\n\n"
+                     "Или отправьте /cancel для отмены.",
             )
         elif callback_data == "tournament_create_scoring_avg":
             data["scoring_formula"] = "avg"
@@ -3967,6 +4151,8 @@ async def _create_tournament_from_data(
         participant_limit=data.get("participant_limit"),
         rules_summary=data.get("rules_summary"),
         full_rules=data.get("full_rules"),
+        scoring_formula=data.get("scoring_formula"),
+        top_n_count=data.get("top_n_count"),
     )
 
 
@@ -4785,6 +4971,15 @@ async def tournament_create_message_handler(
             else:
                 # Для командного турнира формула уже выбрана через callback
                 # Этот шаг не должен достигаться для командных турниров
+                pass
+        
+        elif step == "top_n_count":
+            # Запрос количества N для формулы топ-N
+            try:
+                n = int(text)
+                if n < 1:
+                    raise ValueError
+                data["top_n_count"] = n
                 creation_data["step"] = "prizes"
                 await message.answer(
                     "🏆 Создание турнира\n\n"
@@ -4792,6 +4987,12 @@ async def tournament_create_message_handler(
                     "Введите описание призов (или 'нет' для пропуска):\n\n"
                     "Или отправьте /cancel для отмены.",
                 )
+            except ValueError:
+                await message.answer(
+                    "❌ Введите корректное число (больше 0).\n\n"
+                    "Или отправьте /cancel для отмены.",
+                )
+                return
         
         elif step == "prizes":
             if text.lower() in ("нет", "no", "н"):

@@ -1434,6 +1434,46 @@ class MongoClient:
             _LOG.error(f"Ошибка при обновлении позиции результата: {e}")
             raise
     
+    async def _calculate_team_points(
+        self,
+        tournament: Tournament,
+        team_id: str,
+        player_kills: dict[int, int],
+    ) -> int:
+        """
+        Рассчитывает очки команды по формуле турнира.
+        
+        Args:
+            tournament: Объект турнира
+            team_id: ID команды
+            player_kills: Словарь {player_id: kills} для игроков команды
+        
+        Returns:
+            Рассчитанные очки команды
+        """
+        if not tournament.scoring_formula:
+            # Если формула не указана, используем сумму по умолчанию
+            return sum(player_kills.values())
+        
+        if tournament.scoring_formula == "sum":
+            # Сумма киллов всех игроков команды
+            return sum(player_kills.values())
+        
+        elif tournament.scoring_formula == "topn":
+            # Топ-N игроков команды
+            n = tournament.top_n_count or 3  # По умолчанию топ-3
+            sorted_kills = sorted(player_kills.values(), reverse=True)
+            return sum(sorted_kills[:n])
+        
+        elif tournament.scoring_formula == "avg":
+            # Среднее по игрокам
+            if not player_kills:
+                return 0
+            return sum(player_kills.values()) // len(player_kills)
+        
+        # По умолчанию - сумма
+        return sum(player_kills.values())
+    
     async def update_tournament_results_from_matches(
         self,
         tournament_id: str,
@@ -1445,56 +1485,106 @@ class MongoClient:
             tournament_id: ID турнира
         """
         try:
+            # Получаем турнир для определения формата и формулы
+            tournament = await self.get_tournament(tournament_id)
+            if not tournament:
+                _LOG.error(f"Турнир {tournament_id} не найден")
+                return
+            
             match_results_collection = self.db["match_results"]
             tournament_results_collection = self.db["tournament_results"]
             
             # Получаем все результаты матчей турнира
             cursor = match_results_collection.find({"tournament_id": tournament_id})
             
-            # Группируем по участникам
-            participant_kills: dict[tuple[str, Optional[int], Optional[str]], int] = {}
+            if tournament.format == TournamentFormat.SOLO:
+                # Для соло турниров: группируем по игрокам
+                player_kills: dict[int, int] = {}
+                
+                async for doc in cursor:
+                    result = MatchResult(**doc)
+                    if result.player_id:
+                        player_kills[result.player_id] = player_kills.get(result.player_id, 0) + result.kills
+                
+                # Обновляем или создаем итоговые результаты для игроков
+                for player_id, total_kills in player_kills.items():
+                    query = {"tournament_id": tournament_id, "player_id": player_id}
+                    existing = await tournament_results_collection.find_one(query)
+                    
+                    # Для соло турниров: очки игрока = количество киллов
+                    total_points = total_kills
+                    
+                    if existing:
+                        await tournament_results_collection.update_one(
+                            query,
+                            {"$set": {
+                                "total_kills": total_kills,
+                                "total_points": total_points,
+                                "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                            }},
+                        )
+                    else:
+                        import secrets
+                        result_id = f"tournament_result_{secrets.token_urlsafe(12)}"
+                        result = TournamentResult(
+                            id=result_id,
+                            tournament_id=tournament_id,
+                            player_id=player_id,
+                            team_id=None,
+                            total_kills=total_kills,
+                            total_points=total_points,
+                        )
+                        await tournament_results_collection.insert_one(result.model_dump())
             
-            async for doc in cursor:
-                result = MatchResult(**doc)
-                key = (tournament_id, result.player_id, result.team_id)
-                participant_kills[key] = participant_kills.get(key, 0) + result.kills
-            
-            # Обновляем или создаем итоговые результаты
-            for (tid, player_id, team_id), total_kills in participant_kills.items():
-                query = {"tournament_id": tid}
-                if player_id:
-                    query["player_id"] = player_id
-                if team_id:
-                    query["team_id"] = team_id
+            else:
+                # Для командных турниров: группируем по командам и игрокам
+                team_player_kills: dict[str, dict[int, int]] = {}  # {team_id: {player_id: kills}}
                 
-                existing = await tournament_results_collection.find_one(query)
+                async for doc in cursor:
+                    result = MatchResult(**doc)
+                    if result.team_id and result.player_id:
+                        if result.team_id not in team_player_kills:
+                            team_player_kills[result.team_id] = {}
+                        team_player_kills[result.team_id][result.player_id] = (
+                            team_player_kills[result.team_id].get(result.player_id, 0) + result.kills
+                        )
                 
-                # Для соло турниров: очки игрока = количество киллов
-                # Для командных турниров: очки рассчитываются по формуле (сумма/топ-N/среднее)
-                is_solo = player_id is not None
-                total_points = total_kills if is_solo else 0
-                
-                if existing:
-                    await tournament_results_collection.update_one(
-                        query,
-                        {"$set": {
-                            "total_kills": total_kills,
-                            "total_points": total_points,
-                            "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
-                        }},
-                    )
-                else:
-                    import secrets
-                    result_id = f"tournament_result_{secrets.token_urlsafe(12)}"
-                    result = TournamentResult(
-                        id=result_id,
-                        tournament_id=tid,
-                        player_id=player_id,
+                # Обновляем или создаем итоговые результаты для команд
+                for team_id, player_kills in team_player_kills.items():
+                    # Рассчитываем общее количество киллов команды
+                    total_kills = sum(player_kills.values())
+                    
+                    # Рассчитываем очки команды по формуле
+                    total_points = await self._calculate_team_points(
+                        tournament=tournament,
                         team_id=team_id,
-                        total_kills=total_kills,
-                        total_points=total_points,
+                        player_kills=player_kills,
                     )
-                    await tournament_results_collection.insert_one(result.model_dump())
+                    
+                    query = {"tournament_id": tournament_id, "team_id": team_id}
+                    existing = await tournament_results_collection.find_one(query)
+                    
+                    if existing:
+                        await tournament_results_collection.update_one(
+                            query,
+                            {"$set": {
+                                "total_kills": total_kills,
+                                "total_points": total_points,
+                                "updated_at": dt.datetime.now(tz=MOSCOW_TZ),
+                            }},
+                        )
+                    else:
+                        import secrets
+                        result_id = f"tournament_result_{secrets.token_urlsafe(12)}"
+                        result = TournamentResult(
+                            id=result_id,
+                            tournament_id=tournament_id,
+                            player_id=None,
+                            team_id=team_id,
+                            total_kills=total_kills,
+                            total_points=total_points,
+                        )
+                        await tournament_results_collection.insert_one(result.model_dump())
             
             _LOG.info(f"Обновлены итоговые результаты турнира {tournament_id} на основе матчей")
         except Exception as e:

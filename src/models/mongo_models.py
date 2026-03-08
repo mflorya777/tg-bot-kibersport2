@@ -254,6 +254,15 @@ class Tournament(BaseModel):
         description="Полные правила турнира",
     )
     #
+    scoring_formula: Optional[str] = Field(
+        None,
+        description="Формула подсчёта очков команды: 'sum' (сумма), 'topn' (топ-N), 'avg' (среднее)",
+    )
+    top_n_count: Optional[int] = Field(
+        None,
+        description="Количество игроков для формулы 'топ-N' (если scoring_formula == 'topn')",
+    )
+    #
     solo_participants: list[int] = Field(
         default_factory=list,
         description="Список Telegram user_id участников (для соло)",
