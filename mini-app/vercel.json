@@ -1,19 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/referral.html",
-      "destination": "/referral.html"
-    },
-    {
-      "source": "/index.html",
-      "destination": "/index.html"
-    },
-    {
       "source": "/profile",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]

@@ -1346,7 +1346,14 @@ async def callback_handler(
         from src.config import MINI_APP_URL
         
         # Формируем URL для реферальной страницы
-        referral_url = MINI_APP_URL.replace("/profile", "/referral.html")
+        # MINI_APP_URL может быть базовым URL или с путем /profile
+        # Нужно получить базовый URL и добавить /referral.html
+        base_url = MINI_APP_URL.rstrip('/')
+        if '/profile' in base_url:
+            base_url = base_url.replace('/profile', '')
+        elif base_url.endswith('/index.html'):
+            base_url = base_url.replace('/index.html', '')
+        referral_url = f"{base_url}/referral.html"
         
         await callback.message.edit_text(
             text="🤝 Пригласи друга\n\n"
