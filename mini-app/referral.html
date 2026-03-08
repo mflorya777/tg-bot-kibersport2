@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Пригласи друга - Kibersport</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #0d1b2a 100%);
+            background-attachment: fixed;
+            color: var(--tg-theme-text-color, #ffffff);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #ffffff;
+            text-shadow: 0 2px 10px rgba(102, 126, 234, 0.5);
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .referral-link-section {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .referral-link-label {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #b0b0b0);
+            margin-bottom: 10px;
+        }
+
+        .referral-link-box {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 14px;
+            color: #ffffff;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #ffffff;
+            text-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #b0b0b0);
+        }
+
+        .rules-section {
+            margin-top: 20px;
+        }
+
+        .rules-section h2 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: var(--tg-theme-hint-color, #b0b0b0);
+        }
+
+        .rules-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .rules-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+
+        .rules-list li:last-child {
+            border-bottom: none;
+        }
+
+        .rules-list li::before {
+            content: "• ";
+            color: rgba(102, 126, 234, 0.8);
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .button:active {
+            transform: scale(0.98);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .button:hover {
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+        }
+
+        .button-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--tg-theme-hint-color, #b0b0b0);
+        }
+
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #ff3333;
+        }
+
+        .copy-button {
+            background: rgba(102, 126, 234, 0.3);
+            border: 1px solid rgba(102, 126, 234, 0.5);
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: all 0.2s;
+        }
+
+        .copy-button:active {
+            background: rgba(102, 126, 234, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤝 Пригласи друга</h1>
+        </div>
+
+        <div id="loading" class="loading">Загрузка данных...</div>
+        <div id="error" class="error" style="display: none;"></div>
+        <div id="content" style="display: none;">
+            <div class="card">
+                <div class="referral-link-section">
+                    <div class="referral-link-label">Твоя персональная ссылка</div>
+                    <div class="referral-link-box" id="referral-link">—</div>
+                    <button class="copy-button" onclick="copyReferralLink()">📋 Копировать ссылку</button>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="invited-count">0</div>
+                        <div class="stat-label">Приглашено друзей</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="bonus-amount">0</div>
+                        <div class="stat-label">Начислено бонусов</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="rules-section">
+                    <h2>📜 Правила</h2>
+                    <ul class="rules-list" id="rules-list">
+                        <li>За каждого приглашенного друга вы получаете бонус</li>
+                        <li>Друг должен зарегистрироваться по вашей ссылке</li>
+                        <li>Бонусы начисляются автоматически после регистрации друга</li>
+                        <li>Максимальное количество приглашений не ограничено</li>
+                    </ul>
+                </div>
+            </div>
+
+            <button class="button" onclick="shareReferralLink()">📤 Поделиться ссылкой</button>
+            <button class="button button-secondary" onclick="showRules()">📜 Подробные правила</button>
+        </div>
+    </div>
+
+    <script>
+        // Инициализация Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // Получение данных пользователя из Telegram
+        const user = tg.initDataUnsafe?.user || {};
+        const userId = user.id;
+
+        // Загрузка данных рефералки
+        async function loadReferralData() {
+            try {
+                // Здесь можно добавить запрос к API бота для получения данных
+                // Пока используем данные из Telegram и генерируем ссылку
+                
+                // Получаем реферальный код пользователя
+                // В реальности это должно приходить с сервера через API
+                // Пока используем формат REF{userId}
+                const referralCode = userId ? `REF${userId}` : 'REF000000';
+                
+                // Получаем имя бота из Telegram WebApp
+                const botUsername = tg.initDataUnsafe?.start_param || 'testtt_crm_bot';
+                const referralLink = `https://t.me/${botUsername}?start=${referralCode}`;
+                
+                // Данные рефералки (в реальности должны приходить с сервера)
+                const referralData = {
+                    referral_link: referralLink,
+                    referral_code: referralCode,
+                    invited_count: 0,
+                    bonus_amount: 0,
+                };
+
+                displayReferralData(referralData);
+            } catch (error) {
+                console.error('Ошибка загрузки данных рефералки:', error);
+                showError('Не удалось загрузить данные');
+            }
+        }
+
+        // Отображение данных
+        function displayReferralData(data) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+
+            document.getElementById('referral-link').textContent = data.referral_link || '—';
+            document.getElementById('invited-count').textContent = data.invited_count || 0;
+            document.getElementById('bonus-amount').textContent = `${data.bonus_amount || 0} CD токенов`;
+        }
+
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').textContent = message;
+        }
+
+        // Копирование ссылки
+        function copyReferralLink() {
+            const linkElement = document.getElementById('referral-link');
+            const link = linkElement.textContent;
+            
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(link).then(() => {
+                    tg.showAlert('✅ Ссылка скопирована в буфер обмена!');
+                }).catch(() => {
+                    fallbackCopy(link);
+                });
+            } else {
+                fallbackCopy(link);
+            }
+        }
+
+        function fallbackCopy(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                tg.showAlert('✅ Ссылка скопирована в буфер обмена!');
+            } catch (err) {
+                tg.showAlert('❌ Не удалось скопировать ссылку');
+            }
+            document.body.removeChild(textArea);
+        }
+
+        // Поделиться ссылкой
+        function shareReferralLink() {
+            const link = document.getElementById('referral-link').textContent;
+            
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Присоединяйся к Kibersport!',
+                    text: 'Присоединяйся к киберспортивной платформе Kibersport и участвуй в турнирах!',
+                    url: link,
+                }).catch(() => {
+                    tg.showAlert('Поделиться можно через кнопку "Копировать ссылку"');
+                });
+            } else {
+                copyReferralLink();
+                tg.showAlert('Ссылка скопирована! Поделитесь ею вручную.');
+            }
+        }
+
+        // Показать подробные правила
+        function showRules() {
+            const rules = [
+                '🎯 Как работает реферальная программа:',
+                '',
+                '1. Скопируйте вашу персональную ссылку',
+                '2. Поделитесь ссылкой с друзьями',
+                '3. Когда друг зарегистрируется по вашей ссылке, вы получите бонус',
+                '4. Бонусы начисляются автоматически',
+                '',
+                '💰 Размер бонусов:',
+                '• За каждого приглашенного друга: 50 CD токенов',
+                '• Дополнительные бонусы за активность друзей',
+                '',
+                '📊 Статистика:',
+                '• Отслеживайте количество приглашенных друзей',
+                '• Смотрите общую сумму начисленных бонусов',
+                '',
+                '⚠️ Важно:',
+                '• Ссылка должна быть уникальной для каждого пользователя',
+                '• Бонусы начисляются только за реальных пользователей',
+                '• Запрещено создание фейковых аккаунтов',
+            ].join('\n');
+            
+            tg.showAlert(rules);
+        }
+
+        // Загружаем данные при загрузке страницы
+        loadReferralData();
+    </script>
+</body>
+</html>

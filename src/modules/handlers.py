@@ -4,7 +4,7 @@ import string
 import datetime as dt
 from typing import Optional
 from aiogram import types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.filters import Command
 
 from src.modules.keyboards import (
@@ -1341,10 +1341,31 @@ async def callback_handler(
             )
     elif callback_data == "menu_invite":
         await callback.answer("Пригласи друга")
+        # Открываем мини-приложение для реферальной системы
+        from aiogram.types import WebAppInfo
+        from src.config import MINI_APP_URL
+        
+        # Формируем URL для реферальной страницы
+        referral_url = MINI_APP_URL.replace("/profile", "/referral.html")
+        
         await callback.message.edit_text(
-            text="🤝 Пригласи друга\n\nРаздел в разработке...",
-            reply_markup=get_main_menu_keyboard(
-                show_admin=show_admin,
+            text="🤝 Пригласи друга\n\n"
+                 "Нажмите на кнопку ниже, чтобы открыть реферальную систему:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🤝 Открыть реферальную систему",
+                            web_app=WebAppInfo(url=referral_url),
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="⬅️ Назад",
+                            callback_data="menu_back",
+                        ),
+                    ],
+                ],
             ),
         )
     elif callback_data == "menu_support":
