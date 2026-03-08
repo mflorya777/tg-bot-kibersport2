@@ -264,18 +264,39 @@
         // Загрузка настроек
         async function loadSettings() {
             try {
-                // Здесь можно добавить запрос к API бота для получения данных
-                // Пока используем тестовые данные
-                const settingsData = {
-                    bonus_per_referral: 50,
-                    referral_condition: "registration",
-                    anti_fraud_rule: "one_account_one_device",
-                };
-
+                // Определяем URL API
+                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                const apiUrl = `${apiBaseUrl}/api/referral-settings/${userId}`;
+                
+                // Получаем initData для проверки подлинности (опционально)
+                const initData = tg.initData || '';
+                
+                // Запрос к API
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Init-Data': initData,
+                    },
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 403) {
+                        showError('Доступ запрещен. Только супер-админы могут просматривать настройки рефералки.');
+                        return;
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const settingsData = await response.json();
+                
+                // Логируем полученные данные для отладки
+                console.log('Настройки реферальной системы из API:', settingsData);
+                
                 displaySettings(settingsData);
             } catch (error) {
                 console.error('Ошибка загрузки настроек:', error);
-                showError('Не удалось загрузить настройки');
+                showError('Не удалось загрузить настройки. Попробуйте позже.');
             }
         }
 
@@ -306,9 +327,35 @@
             };
 
             try {
-                // Здесь должен быть запрос к API бота для сохранения настроек
-                // Пока показываем успешное сообщение
-                tg.showAlert('Настройки успешно сохранены!');
+                // Определяем URL API
+                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                const apiUrl = `${apiBaseUrl}/api/referral-settings/${userId}`;
+                
+                // Получаем initData для проверки подлинности (опционально)
+                const initData = tg.initData || '';
+                
+                // Запрос к API
+                const response = await fetch(apiUrl, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Init-Data': initData,
+                    },
+                    body: JSON.stringify(settings),
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    if (response.status === 403) {
+                        tg.showAlert('Доступ запрещен. Только супер-админы могут изменять настройки рефералки.');
+                        return;
+                    }
+                    throw new Error(errorData.detail || 'Ошибка при сохранении настроек');
+                }
+                
+                const result = await response.json();
+                
+                tg.showAlert(result.message || 'Настройки успешно сохранены!');
                 
                 // Показываем сообщение об успехе
                 const successDiv = document.getElementById('success');
@@ -316,9 +363,14 @@
                 setTimeout(() => {
                     successDiv.style.display = 'none';
                 }, 3000);
+                
+                // Обновляем форму с сохраненными значениями
+                if (result.settings) {
+                    displaySettings(result.settings);
+                }
             } catch (error) {
                 console.error('Ошибка сохранения настроек:', error);
-                tg.showAlert('Ошибка при сохранении настроек');
+                tg.showAlert(error.message || 'Ошибка при сохранении настроек');
             }
         });
 

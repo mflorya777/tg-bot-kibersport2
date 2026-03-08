@@ -12,6 +12,7 @@ from src.models.mongo_models import (
     TransactionType,
     MOSCOW_TZ,
 )
+from src.models.user_roles import UserRole
 from src.config import BOT_USERNAME
 
 
@@ -447,4 +448,197 @@ async def get_referral(
         raise HTTPException(
             status_code=500,
             detail=f"Ошибка при получении данных реферальной системы: {str(e)}",
+        )
+
+
+async def _check_super_admin(user_id: int) -> None:
+    """
+    Проверяет, является ли пользователь супер-админом.
+    
+    Args:
+        user_id: Telegram user_id пользователя
+    
+    Raises:
+        HTTPException: Если пользователь не является супер-админом
+    """
+    if _mongo_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="База данных недоступна",
+        )
+    
+    user = await _mongo_client.get_user(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Пользователь не найден",
+        )
+    
+    if user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Доступ запрещен. Только супер-админы могут изменять настройки рефералки.",
+        )
+
+
+class ReferralSettingsResponse(BaseModel):
+    """Модель ответа для настроек реферальной системы."""
+    bonus_per_referral: int
+    referral_condition: str
+    anti_fraud_rule: str
+
+
+class ReferralSettingsUpdateRequest(BaseModel):
+    """Модель запроса на обновление настроек реферальной системы."""
+    bonus_per_referral: Optional[int] = None
+    referral_condition: Optional[str] = None
+    anti_fraud_rule: Optional[str] = None
+
+
+class ReferralSettingsUpdateResponse(BaseModel):
+    """Модель ответа на обновление настроек реферальной системы."""
+    success: bool
+    message: str
+    settings: ReferralSettingsResponse
+
+
+@router.get("/referral-settings/{user_id}")
+async def get_referral_settings(
+    user_id: int,
+    x_init_data: Optional[str] = Header(None, alias="X-Init-Data"),
+) -> ReferralSettingsResponse:
+    """
+    Получает настройки реферальной системы.
+    Доступно только для супер-админов.
+    
+    Args:
+        user_id: Telegram user_id пользователя
+        x_init_data: InitData из Telegram WebApp (для проверки подлинности, опционально)
+    
+    Returns:
+        Настройки реферальной системы
+    
+    Raises:
+        HTTPException: Если произошла ошибка или доступ запрещен
+    """
+    # Проверяем права доступа
+    await _check_super_admin(user_id)
+    
+    if _mongo_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="База данных недоступна",
+        )
+    
+    try:
+        # Получаем настройки реферальной системы
+        referral_settings = await _mongo_client.get_referral_settings()
+        
+        if not referral_settings:
+            # Возвращаем настройки по умолчанию
+            return ReferralSettingsResponse(
+                bonus_per_referral=50,
+                referral_condition="registration",
+                anti_fraud_rule="one_account_one_device",
+            )
+        
+        return ReferralSettingsResponse(
+            bonus_per_referral=referral_settings.bonus_per_referral,
+            referral_condition=referral_settings.referral_condition,
+            anti_fraud_rule=referral_settings.anti_fraud_rule,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении настроек реферальной системы: {str(e)}",
+        )
+
+
+@router.put("/referral-settings/{user_id}")
+async def update_referral_settings(
+    user_id: int,
+    request: ReferralSettingsUpdateRequest,
+    x_init_data: Optional[str] = Header(None, alias="X-Init-Data"),
+) -> ReferralSettingsUpdateResponse:
+    """
+    Обновляет настройки реферальной системы.
+    Доступно только для супер-админов.
+    
+    Args:
+        user_id: Telegram user_id пользователя
+        request: Данные для обновления настроек
+        x_init_data: InitData из Telegram WebApp (для проверки подлинности, опционально)
+    
+    Returns:
+        Результат обновления настроек
+    
+    Raises:
+        HTTPException: Если произошла ошибка или доступ запрещен
+    """
+    # Проверяем права доступа
+    await _check_super_admin(user_id)
+    
+    if _mongo_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="База данных недоступна",
+        )
+    
+    try:
+        # Валидация данных
+        if request.bonus_per_referral is not None and request.bonus_per_referral < 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Бонус за приглашённого не может быть отрицательным",
+            )
+        
+        if request.referral_condition is not None:
+            if request.referral_condition not in ["registration", "tournament"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Неверное условие засчитывания. Допустимые значения: registration, tournament",
+                )
+        
+        if request.anti_fraud_rule is not None:
+            valid_rules = [
+                "one_account_one_device",
+                "one_account_one_number",
+                "one_account_one_device_number",
+            ]
+            if request.anti_fraud_rule not in valid_rules:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Неверное правило защиты от накрутки. Допустимые значения: {', '.join(valid_rules)}",
+                )
+        
+        # Обновляем настройки
+        updated_settings = await _mongo_client.update_referral_settings(
+            bonus_per_referral=request.bonus_per_referral,
+            referral_condition=request.referral_condition,
+            anti_fraud_rule=request.anti_fraud_rule,
+        )
+        
+        if not updated_settings:
+            raise HTTPException(
+                status_code=500,
+                detail="Не удалось обновить настройки",
+            )
+        
+        return ReferralSettingsUpdateResponse(
+            success=True,
+            message="Настройки успешно сохранены",
+            settings=ReferralSettingsResponse(
+                bonus_per_referral=updated_settings.bonus_per_referral,
+                referral_condition=updated_settings.referral_condition,
+                anti_fraud_rule=updated_settings.anti_fraud_rule,
+            ),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при обновлении настроек реферальной системы: {str(e)}",
         )
