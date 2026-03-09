@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <!-- URL API сервера (автоматически обновляется скриптом get_ngrok_url.py) -->
-    <meta name="api-base-url" content="">
+    <!-- URL API сервера -->
+    <meta name="api-base-url" content="https://test-all-blabla.ru">
     <title>Пригласи друга - Kibersport</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -252,8 +252,8 @@
         // Загрузка данных рефералки
         async function loadReferralData() {
             try {
-                // Определяем URL API
-                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                // По умолчанию мини-апп ходит в API на сервере, а не на Vercel-origin.
+                let apiBaseUrl = window.API_BASE_URL || 'https://test-all-blabla.ru';
                 const apiUrl = `${apiBaseUrl}/api/referral/${userId}`;
                 
                 // Получаем initData для проверки подлинности (опционально)
@@ -354,7 +354,7 @@
         async function showRules() {
             try {
                 // Загружаем актуальные настройки из API
-                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                let apiBaseUrl = window.API_BASE_URL || 'https://test-all-blabla.ru';
                 const apiUrl = `${apiBaseUrl}/api/referral/${userId}`;
                 const initData = tg.initData || '';
                 

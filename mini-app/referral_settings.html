@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <!-- URL API сервера (автоматически обновляется скриптом get_ngrok_url.py) -->
-    <meta name="api-base-url" content="">
+    <!-- URL API сервера -->
+    <meta name="api-base-url" content="https://test-all-blabla.ru">
     <title>Настройки рефералки - Kibersport</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -280,8 +280,8 @@
             if (metaTag && metaTag.content) {
                 return metaTag.content;
             }
-            // По умолчанию используем origin (если API на том же домене)
-            return window.location.origin.replace(/\/$/, '');
+            // По умолчанию мини-апп ходит в API на сервере, а не на Vercel-origin.
+            return 'https://test-all-blabla.ru';
         })();
 
         // Загрузка настроек

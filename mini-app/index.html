@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <!-- URL API сервера (автоматически обновляется скриптом get_ngrok_url.py) -->
-    <meta name="api-base-url" content="">
+    <!-- URL API сервера -->
+    <meta name="api-base-url" content="https://test-all-blabla.ru">
     <title>Профиль - Kibersport</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -250,10 +250,8 @@
         // Загрузка данных профиля
         async function loadProfile() {
             try {
-                // Определяем URL API
-                // Можно использовать переменную окружения или относительный путь
-                // Для продакшена нужно указать полный URL API сервера в переменной API_BASE_URL
-                let apiBaseUrl = window.API_BASE_URL || window.location.origin.replace(/\/$/, '');
+                // По умолчанию мини-апп ходит в API на сервере, а не на Vercel-origin.
+                let apiBaseUrl = window.API_BASE_URL || 'https://test-all-blabla.ru';
                 // Если API на другом домене/порту, можно указать здесь
                 // Например: apiBaseUrl = 'http://localhost:8000';
                 const apiUrl = `${apiBaseUrl}/api/profile/${userId}`;
